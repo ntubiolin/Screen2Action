@@ -196,8 +196,8 @@ class RecordingService:
     
     async def _audio_recording_loop(self):
         """Record mic + system (BlackHole) + mixed track.
-        Saves separate WAV files every self.audio_chunk_seconds.
-        Filenames: YYYY_MM_DD_HH_mm_SS_<chunkIdx>_<track>.wav track in {mic, sys, mix}
+        Records one continuous audio file from start to end.
+        Filenames: YYYY_MM_DD_HH_mm_SS_full_<track>.wav track in {mic, sys, mix}
         """
         if not self.current_session:
             return
@@ -207,6 +207,13 @@ class RecordingService:
             devices = sd.query_devices()
             mic_idx = None
             sys_idx = None
+            
+            # Print all available audio devices for debugging
+            logger.info("=== Available Audio Devices ===")
+            for i, d in enumerate(devices):
+                if d.get('max_input_channels', 0) > 0:
+                    logger.info(f"Device {i}: {d['name']} (inputs: {d.get('max_input_channels')}, outputs: {d.get('max_output_channels')})")
+            
             for i, d in enumerate(devices):
                 if d.get('max_input_channels', 0) > 0:
                     name_lower = d['name'].lower()
@@ -231,7 +238,18 @@ class RecordingService:
                 sys_idx = mic_idx
                 if mic_idx is not None:
                     self._audio_device_names['system'] = self._audio_device_names['mic'] + ' (dup)'
-            logger.info(f"Selected mic device idx={mic_idx}, sys device idx={sys_idx}")
+            
+            # Log device selection with BlackHole detection
+            logger.info(f"=== Selected Audio Devices ===")
+            logger.info(f"Microphone: {self._audio_device_names.get('mic', 'None')} (idx={mic_idx})")
+            logger.info(f"System Audio: {self._audio_device_names.get('system', 'None')} (idx={sys_idx})")
+            
+            # Check if BlackHole is being used
+            if self._audio_device_names.get('system') and 'blackhole' in self._audio_device_names['system'].lower():
+                logger.info("✓ BlackHole device detected for system audio capture")
+            else:
+                logger.warning("⚠ BlackHole device NOT detected - system audio may not be captured properly")
+                logger.warning("Please install BlackHole from https://github.com/ExistentialAudio/BlackHole")
         except Exception as e:
             logger.error(f"Audio device query failed: {e}")
             return
@@ -267,22 +285,23 @@ class RecordingService:
             logger.error(f"Failed to start audio streams: {e}")
             return
 
-        logger.info("Backend audio capture started (mic/system/mix)")
+        logger.info("Backend audio capture started (continuous recording for entire session)")
 
         try:
             while self.is_recording:
                 await asyncio.sleep(1)
-                # Determine how many frames we have available for mic
-                mic_frames = sum(buf.shape[0] for buf in self._mic_buffers)
-                if mic_frames >= self.audio_frames_per_chunk:
-                    await self._flush_audio_chunk(session_dir, start_time)
+                # Just accumulate buffers, don't write chunks
+                # We'll write everything at the end
         except asyncio.CancelledError:
-            # On cancellation, flush remaining
-            await self._flush_audio_chunk(session_dir, start_time, allow_partial=True)
-            raise
+            # On cancellation, write the complete audio file
+            pass
         except Exception as e:
             logger.error(f"Audio recording error: {e}")
         finally:
+            # Write the complete audio file when recording stops
+            if self._mic_buffers or self._sys_buffers:
+                await self._write_complete_audio(session_dir, start_time)
+            
             try:
                 if self._mic_stream:
                     self._mic_stream.stop(); self._mic_stream.close()
@@ -290,7 +309,7 @@ class RecordingService:
                     self._sys_stream.stop(); self._sys_stream.close()
             except Exception:
                 pass
-            logger.info("Audio streams closed")
+            logger.info("Audio streams closed and complete audio files saved")
 
     async def _flush_audio_chunk(self, session_audio_dir: Path, start_time: datetime, allow_partial: bool = False):
         """Assemble and write one chunk for mic/sys/mix."""
@@ -340,11 +359,63 @@ class RecordingService:
         self._save_metadata()
         logger.debug(f"Saved audio chunk index={self._audio_chunk_index -1} frames={use_frames}")
 
+    async def _write_complete_audio(self, session_audio_dir: Path, start_time: datetime):
+        """Write the complete audio recording as single files for mic/sys/mix."""
+        if not self._mic_buffers:
+            return
+            
+        logger.info("Writing complete audio files...")
+        
+        # Concatenate all mic buffers
+        mic_complete = np.concatenate(self._mic_buffers, axis=0)
+        
+        # System audio
+        if self._sys_stream is None and not self._sys_buffers:
+            # Duplicate mic as system if no separate system stream
+            sys_complete = mic_complete.copy()
+        else:
+            if self._sys_buffers:
+                sys_complete = np.concatenate(self._sys_buffers, axis=0)
+                # Ensure same length as mic
+                if sys_complete.shape[0] < mic_complete.shape[0]:
+                    pad_len = mic_complete.shape[0] - sys_complete.shape[0]
+                    sys_complete = np.concatenate([sys_complete, np.zeros((pad_len, 1), dtype=np.float32)], axis=0)
+                elif sys_complete.shape[0] > mic_complete.shape[0]:
+                    sys_complete = sys_complete[:mic_complete.shape[0]]
+            else:
+                sys_complete = np.zeros_like(mic_complete)
+        
+        # Mixed audio
+        mix_complete = (mic_complete + sys_complete) / 2.0
+        
+        # Normalize to avoid clipping
+        for name, arr in [("mic", mic_complete), ("sys", sys_complete), ("mix", mix_complete)]:
+            max_abs = np.max(np.abs(arr))
+            if max_abs > 0.99:
+                arr /= max_abs
+        
+        # Build filenames with datetime prefix
+        dt_prefix = start_time.strftime('%Y_%m_%d_%H_%M_%S')
+        duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        # Write complete audio files
+        for track_name, data in [("mic", mic_complete), ("sys", sys_complete), ("mix", mix_complete)]:
+            fname = f"{dt_prefix}_full_{track_name}.wav"
+            fpath = session_audio_dir / fname
+            self._write_wav(fpath, data)
+            if self.current_session:
+                self.current_session.audio_files.setdefault(track_name, []).append(str(fpath))
+            logger.info(f"Saved complete {track_name} audio: {fname} (duration: {duration_ms}ms, frames: {data.shape[0]})")
+        
+        # Clear buffers
+        self._mic_buffers.clear()
+        self._sys_buffers.clear()
+        self._save_metadata()
+        logger.info(f"Complete audio files saved successfully (total duration: {duration_ms/1000:.1f}s)")
+    
     async def _finalize_audio(self):
-        # Flush any remaining partial audio
-        if self.current_session:
-            session_audio_dir = self.recordings_dir / self.current_session.id / "audio"
-            await self._flush_audio_chunk(session_audio_dir, self.current_session.start_time, allow_partial=True)
+        # No need to flush chunks anymore since we write complete files
+        pass
 
     def _write_wav(self, path_out: Path, data: np.ndarray):
         try:

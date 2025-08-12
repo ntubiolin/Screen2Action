@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pause: () => ipcRenderer.invoke('pause-audio'),
     stop: () => ipcRenderer.invoke('stop-audio'),
     getAudioPath: (sessionId: string, timestamp: number) => ipcRenderer.invoke('get-audio-path', sessionId, timestamp),
+    getCompleteAudioPath: (sessionId: string, track?: 'mic' | 'sys' | 'mix') => ipcRenderer.invoke('get-complete-audio-path', sessionId, track),
+    playWithTimeRange: (filePath: string, startTime: number, endTime: number) => ipcRenderer.invoke('play-audio-with-time-range', filePath, startTime, endTime),
   },
   
   file: {

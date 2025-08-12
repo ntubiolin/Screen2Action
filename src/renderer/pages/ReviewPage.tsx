@@ -152,13 +152,17 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
 
   const playAudioSegment = async (timestamp: number) => {
     try {
-      // Get the audio file path for this timestamp
-      const audioPath = await window.electronAPI.audio.getAudioPath(sessionId, timestamp);
+      // Get the complete audio file path (mix track)
+      const audioPath = await window.electronAPI.audio.getCompleteAudioPath(sessionId, 'mix');
       
-      // Play the audio file
-      await window.electronAPI.audio.play(audioPath);
+      // Find the next note's timestamp for end time, or use current + 5 seconds
+      const currentIndex = notes.findIndex(n => n.timestamp === timestamp);
+      const endTimestamp = notes[currentIndex + 1]?.timestamp || (timestamp + 5000);
       
-      console.log('Playing audio at timestamp:', timestamp);
+      // Play the audio file from start to end timestamp
+      await window.electronAPI.audio.playWithTimeRange(audioPath, timestamp / 1000, endTimestamp / 1000);
+      
+      console.log(`Playing audio from ${timestamp}ms to ${endTimestamp}ms`);
     } catch (error: any) {
       console.error('Failed to play audio:', error);
       // Show user-friendly message based on the error

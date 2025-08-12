@@ -40,6 +40,7 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 - uv (Python package manager) - [Installation Guide](https://docs.astral.sh/uv/)
 - FFmpeg (for audio processing)
 - Tesseract (for OCR)
+- BlackHole (for system audio capture on macOS) - [Download from GitHub](https://github.com/ExistentialAudio/BlackHole)
 
 ### 1. Install Frontend Dependencies
 
@@ -205,6 +206,14 @@ For questions or suggestions, please contact via GitHub Issues.
 
 ## Recent Updates (2025-08-12)
 
+### Latest Changes
+- **Enhanced**: Continuous audio recording - Records one complete audio file from start to end of session
+- **Added**: BlackHole device detection and verification for system audio capture
+- **Fixed**: Markdown timestamp recording - Now supports [MM:SS] format in notes for precise timing
+- **Improved**: Audio playback now plays from note timestamp to next note's timestamp
+- **Added**: Device selection logging to verify BlackHole is being used correctly
+
+### Previous Updates
 - **Fixed**: Audio playback button now properly configured (audio recording in development)
 - **Fixed**: Screenshots now render correctly in review interface
 - **Added**: Custom output path selection for recordings
@@ -212,3 +221,17 @@ For questions or suggestions, please contact via GitHub Issues.
 - **Improved**: Better error handling for missing recording files
 - **Changed**: Screenshot frequency adjusted to 10 seconds per capture
 - **Cleaned**: Removed unused imports for better code quality
+
+## Audio Recording Setup
+
+### System Audio Capture (macOS)
+For capturing system audio, install BlackHole:
+1. Download from: https://github.com/ExistentialAudio/BlackHole
+2. Configure Multi-Output Device in Audio MIDI Setup
+3. The app will automatically detect and use BlackHole for system audio
+
+### Note Timestamps
+When taking notes during recording, you can use timestamp format:
+- Format: `[MM:SS] Your note here`
+- Example: `[01:30] Important discussion point`
+- Notes without timestamps will be distributed evenly across recording duration

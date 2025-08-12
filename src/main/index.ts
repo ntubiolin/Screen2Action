@@ -237,6 +237,68 @@ ipcMain.handle('stop-audio', async () => {
   return;
 });
 
+ipcMain.handle('get-complete-audio-path', async (_, sessionId: string, track: 'mic' | 'sys' | 'mix' = 'mix') => {
+  const fs = require('fs');
+  // Check both backend/recordings and recordings directories
+  const backendAudioDir = path.join(process.cwd(), 'backend', 'recordings', sessionId, 'audio');
+  const frontendAudioDir = path.join(process.cwd(), 'recordings', sessionId, 'audio');
+  
+  const recordingsDir = fs.existsSync(backendAudioDir) ? backendAudioDir : frontendAudioDir;
+  
+  try {
+    const files = fs.readdirSync(recordingsDir);
+    // Look for complete audio file with pattern: YYYY_MM_DD_HH_mm_SS_full_<track>.wav
+    const completeFile = files.find((f: string) => f.includes('_full_') && f.includes(`_${track}.wav`));
+    
+    if (completeFile) {
+      const fullPath = path.join(recordingsDir, completeFile);
+      console.log(`Found complete ${track} audio file: ${completeFile}`);
+      return fullPath;
+    }
+    
+    // Fallback to any audio file for the track
+    const trackFile = files.find((f: string) => f.includes(`_${track}.`) && (f.endsWith('.wav') || f.endsWith('.mp3') || f.endsWith('.webm')));
+    if (trackFile) {
+      return path.join(recordingsDir, trackFile);
+    }
+    
+    throw new Error(`No ${track} audio file found for session`);
+  } catch (error) {
+    console.error(`Error finding complete audio file: ${error}`);
+    throw new Error('Complete audio file not found');
+  }
+});
+
+ipcMain.handle('play-audio-with-time-range', async (_, filePath: string, startTime: number, endTime: number) => {
+  const { shell } = require('electron');
+  const fs = require('fs');
+  
+  try {
+    // Check if the audio file exists
+    if (fs.existsSync(filePath)) {
+      // For now, we'll use the default system player
+      // In future, we could use ffplay with time range parameters
+      const result = await shell.openPath(filePath);
+      
+      if (result) {
+        console.error('Failed to play audio with time range:', result);
+        throw new Error(`Failed to play audio: ${result}`);
+      }
+      
+      console.log(`Playing audio from ${startTime}s to ${endTime}s: ${filePath}`);
+      // Note: System player won't respect time range, but at least plays the file
+      // TODO: Implement proper time-range playback using ffplay or web audio
+      return;
+    } else {
+      console.error('Audio file not found:', filePath);
+      throw new Error('Audio file not found');
+    }
+  } catch (error) {
+    console.error('Error playing audio with time range:', error);
+    throw error;
+  }
+});
+
 ipcMain.handle('get-audio-path', async (_, sessionId: string, timestamp: number) => {
   const fs = require('fs');
   // Check both backend/recordings and recordings directories

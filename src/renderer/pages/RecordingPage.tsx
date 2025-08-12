@@ -17,6 +17,7 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
   const [conversionMessage, setConversionMessage] = useState<string>('');
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const recordingStartTimeRef = useRef<number>(0);
   
   const { addNote, clearNotes, audioDevices, setAudioDevices, selectedMic, selectedSystem, setSelectedMic, setSelectedSystem } = useRecordingStore();
 
@@ -100,6 +101,7 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
 
       const sessionId = await window.electronAPI.recording.start(selectedScreen);
       sessionIdRef.current = sessionId;
+      recordingStartTimeRef.current = Date.now();
       setIsRecording(true);
       clearNotes();
     } catch (error) {
@@ -125,12 +127,31 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
           }
         }
         
-        // Save notes with timestamps
+        // Parse notes with timestamps from markdown
         const noteEntries = notes.split('\n').filter(line => line.trim());
         noteEntries.forEach((note, index) => {
+          // Try to extract timestamp from note format like "[00:30] Note content"
+          const timestampMatch = note.match(/^\[(\d{2}):(\d{2})\]\s*(.*)/);
+          let timestamp: number;
+          let content: string;
+          
+          if (timestampMatch) {
+            // Calculate timestamp from [mm:ss] format
+            const minutes = parseInt(timestampMatch[1]);
+            const seconds = parseInt(timestampMatch[2]);
+            timestamp = (minutes * 60 + seconds) * 1000; // Convert to milliseconds
+            content = timestampMatch[3];
+          } else {
+            // If no timestamp format found, calculate based on position
+            // Distribute notes evenly across recording duration
+            const recordingDuration = Date.now() - recordingStartTimeRef.current;
+            timestamp = Math.floor((index / Math.max(noteEntries.length - 1, 1)) * recordingDuration);
+            content = note;
+          }
+          
           addNote({
-            content: note,
-            timestamp: index * 10000, // Placeholder timestamp based on order
+            content: content,
+            timestamp: timestamp,
           });
         });
         
@@ -256,7 +277,10 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
       </div>
 
       <div className="flex-1 bg-gray-800 rounded-lg p-4 flex flex-col min-h-[500px]">
-        <h2 className="text-lg font-semibold mb-2 flex-shrink-0">Markdown Notes Editor</h2>
+        <div className="flex justify-between items-start mb-2 flex-shrink-0">
+          <h2 className="text-lg font-semibold">Markdown Notes Editor</h2>
+          <span className="text-xs text-gray-400">Tip: Use [MM:SS] format for timestamps, e.g., [01:30] Note here</span>
+        </div>
         <div className="flex-1 min-h-100 border border-gray-700 rounded overflow-hidden">
           <Editor
             height="500px"

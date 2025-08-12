@@ -20,6 +20,8 @@ export interface ElectronAPI {
     pause: () => Promise<void>;
     stop: () => Promise<void>;
     getAudioPath: (sessionId: string, timestamp: number) => Promise<string>;
+    getCompleteAudioPath: (sessionId: string, track?: 'mic' | 'sys' | 'mix') => Promise<string>;
+    playWithTimeRange: (filePath: string, startTime: number, endTime: number) => Promise<void>;
   };
   file: {
     selectOutputPath: () => Promise<string | null>;
