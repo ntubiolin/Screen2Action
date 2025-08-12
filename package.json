@@ -1,0 +1,46 @@
+{
+  "name": "screen2action",
+  "version": "1.0.0",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "npm run dev:renderer & npm run dev:electron",
+    "dev:renderer": "vite",
+    "dev:electron": "tsc -p tsconfig.electron.json --watch & nodemon --delay 2 --watch dist/main --exec electron . --ext js",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/node": "^24.2.1",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.21",
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12",
+    "electron-reload": "^2.0.0-alpha.1",
+    "nodemon": "^3.1.10",
+    "postcss": "^8.5.6",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.1"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "tailwindcss": "^4.1.11",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.3",
+    "zustand": "^5.0.7"
+  }
+}

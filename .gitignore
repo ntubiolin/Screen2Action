@@ -1,0 +1,76 @@
+# Node
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/*.so
+backend/.Python
+backend/env/
+backend/develop-eggs/
+backend/dist/
+backend/downloads/
+backend/eggs/
+backend/.eggs/
+backend/lib/
+backend/lib64/
+backend/parts/
+backend/sdist/
+backend/var/
+backend/wheels/
+backend/pip-wheel-metadata/
+backend/share/python-wheels/
+backend/*.egg-info/
+backend/.installed.cfg
+backend/*.egg
+backend/MANIFEST
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Application data
+recordings/
+screenshots/
+backend/recordings/
+backend/screenshots/
+*.db
+*.sqlite
+
+# Electron
+out/
+.webpack/
+electron-builder.yml
+
+# Testing
+coverage/
+.nyc_output/
+.pytest_cache/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
