@@ -6,8 +6,10 @@ import { ScreenshotManager } from './screenshot';
 
 // Enable live reload for Electron in development
 if (process.env.NODE_ENV !== 'production') {
+  // Path from dist/main to project root's node_modules
+  const electronPath = path.join(__dirname, '..', '..', '..', '..', 'node_modules', '.bin', 'electron');
   require('electron-reload')(path.join(__dirname, '..'), {
-    electron: path.join(__dirname, '..', '..', 'node_modules', '.bin', 'electron'),
+    electron: electronPath,
     hardResetMethod: 'exit'
   });
 }
