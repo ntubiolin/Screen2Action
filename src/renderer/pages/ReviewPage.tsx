@@ -86,7 +86,12 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
   const [mcpTools, setMcpTools] = useState<Array<any>>([]);
   const [showMcpDropdown, setShowMcpDropdown] = useState(false);
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
+  const [pausedIndex, setPausedIndex] = useState<number | null>(null);
   const [audioProgress, setAudioProgress] = useState<{ [key: number]: number }>({});
+  const [segmentStartTimes, setSegmentStartTimes] = useState<{ [key: number]: number }>({});
+  const [segmentDurations, setSegmentDurations] = useState<{ [key: number]: number }>({});
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const progressIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
   
   const { notes, recordingDuration } = useRecordingStore();
 
@@ -180,7 +185,18 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
     loadOutputPath();
     loadAudioWithRetry();
 
-    return () => { cancelled = true; };
+    return () => { 
+      cancelled = true;
+      // Cleanup audio on unmount
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
   }, [sessionId]);
 
   const handleAISend = async () => {
@@ -331,50 +347,134 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
 
   const playAudioSegment = async (index: number) => {
     try {
-      setPlayingIndex(index);
+      if (!audioPath) {
+        setAudioError('No audio file found for this recording.');
+        return;
+      }
+
+      // If clicking play on the same paused segment, resume
+      if (pausedIndex === index && audioRef.current && audioRef.current.paused) {
+        await audioRef.current.play();
+        setPausedIndex(null);
+        setPlayingIndex(index);
+        startProgressTracking(index);
+        return;
+      }
+
+      // Stop any existing playback
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+
+      // Create or update audio element
+      if (!audioRef.current) {
+        audioRef.current = new Audio();
+      }
+      
+      audioRef.current.src = audioPath;
       const timestamp = notes[index].timestamp;
       const endTimestamp = getEndTimestamp(index);
+      const startTime = timestamp / 1000;
+      const endTime = endTimestamp / 1000;
+      const duration = endTime - startTime;
       
-      // Play the audio file from start to end timestamp
-      await window.electronAPI.audio.playWithTimeRange(audioPath.replace('file://', ''), timestamp / 1000, endTimestamp / 1000);
+      // Store segment info for seeking
+      setSegmentStartTimes(prev => ({ ...prev, [index]: startTime }));
+      setSegmentDurations(prev => ({ ...prev, [index]: duration }));
       
-      // Simulate progress updates
-      const duration = endTimestamp - timestamp;
-      const interval = setInterval(() => {
-        setAudioProgress((prev) => {
-          const newProgress = { ...prev };
-          if (newProgress[index] === undefined) newProgress[index] = 0;
-          newProgress[index] += 100 / (duration / 100); // Update every 100ms
-          if (newProgress[index] >= 100) {
-            clearInterval(interval);
-            setPlayingIndex(null);
-            newProgress[index] = 0;
-          }
-          return newProgress;
-        });
-      }, 100);
+      // Set initial time and play
+      audioRef.current.currentTime = startTime;
+      setPlayingIndex(index);
+      setPausedIndex(null);
+      setAudioProgress({ ...audioProgress, [index]: 0 });
       
-      console.log(`Playing audio from ${timestamp}ms to ${endTimestamp}ms`);
+      await audioRef.current.play();
+      
+      // Start progress tracking
+      startProgressTracking(index);
+      
+      console.log(`Playing audio from ${startTime}s to ${endTime}s`);
     } catch (error: any) {
       console.error('Failed to play audio:', error);
       setPlayingIndex(null);
-      // Show user-friendly message based on the error
-      if (error.message?.includes('not found')) {
+      setPausedIndex(null);
+      setAudioProgress({});
+      if (error.name === 'NotAllowedError') {
+        setAudioError('Please interact with the page first to enable audio playback.');
+      } else if (error.message?.includes('not found')) {
         setAudioError('No audio file found for this recording.');
       } else {
-        setAudioError('Unable to play audio.');
+        setAudioError('Unable to play audio: ' + error.message);
       }
     }
   };
 
-  const stopAudio = async () => {
-    try {
-      await window.electronAPI.audio.stop();
+  const startProgressTracking = (index: number) => {
+    const startTime = segmentStartTimes[index] || (notes[index].timestamp / 1000);
+    const endTime = getEndTimestamp(index) / 1000;
+    const duration = segmentDurations[index] || (endTime - startTime);
+    
+    progressIntervalRef.current = setInterval(() => {
+      if (audioRef.current) {
+        const currentTime = audioRef.current.currentTime;
+        const progress = ((currentTime - startTime) / duration) * 100;
+        
+        if (currentTime >= endTime || audioRef.current.ended) {
+          // Stop when reaching end time
+          audioRef.current.pause();
+          clearInterval(progressIntervalRef.current!);
+          progressIntervalRef.current = null;
+          setPlayingIndex(null);
+          setPausedIndex(null);
+          setAudioProgress((prev) => ({ ...prev, [index]: 0 }));
+        } else if (!audioRef.current.paused) {
+          setAudioProgress((prev) => ({ ...prev, [index]: Math.min(progress, 100) }));
+        }
+      }
+    }, 100);
+  };
+
+  const pauseAudio = () => {
+    if (audioRef.current && !audioRef.current.paused && playingIndex !== null) {
+      audioRef.current.pause();
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      setPausedIndex(playingIndex);
       setPlayingIndex(null);
-      setAudioProgress({});
-    } catch (error) {
-      console.error('Failed to stop audio:', error);
     }
+  };
+
+  const seekAudio = (index: number, progressPercent: number) => {
+    if (!audioRef.current || (!playingIndex && !pausedIndex) || (playingIndex !== index && pausedIndex !== index)) {
+      return;
+    }
+    
+    const startTime = segmentStartTimes[index] || (notes[index].timestamp / 1000);
+    const duration = segmentDurations[index] || (getEndTimestamp(index) / 1000 - startTime);
+    const newTime = startTime + (duration * progressPercent / 100);
+    
+    audioRef.current.currentTime = newTime;
+    setAudioProgress(prev => ({ ...prev, [index]: progressPercent }));
+  };
+
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+    setPlayingIndex(null);
+    setPausedIndex(null);
+    setAudioProgress({});
   };
 
   return (
@@ -428,42 +528,78 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
                     </div>
                   </div>
                   
-                  {/* Audio Controls Section - Play, Stop, Progress Bar */}
+                  {/* Audio Controls Section - Play, Pause, Stop, Progress Bar */}
                   <div className="bg-gray-850 px-4 py-3 border-b border-gray-700">
-                    <div className="flex items-center space-x-4">
-                      {/* Play Button */}
+                    <div className="flex items-center space-x-3">
+                      {/* Play/Resume Button */}
                       <button
                         onClick={() => playAudioSegment(index)}
                         disabled={playingIndex === index || !audioPath}
                         className={`p-2 rounded-full transition-colors ${
                           playingIndex === index
                             ? 'bg-green-600 text-white'
+                            : pausedIndex === index
+                            ? 'bg-yellow-600 hover:bg-yellow-500 text-white'
                             : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        title={pausedIndex === index ? 'Resume' : 'Play'}
                       >
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
                         </svg>
                       </button>
                       
+                      {/* Pause Button */}
+                      <button
+                        onClick={pauseAudio}
+                        disabled={playingIndex !== index}
+                        className={`p-2 rounded-full transition-colors ${
+                          playingIndex === index
+                            ? 'bg-orange-600 hover:bg-orange-500 text-white'
+                            : 'bg-gray-700 text-gray-500'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        title="Pause"
+                      >
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M6 4a1 1 0 011 1v10a1 1 0 11-2 0V5a1 1 0 011-1zm8 0a1 1 0 011 1v10a1 1 0 11-2 0V5a1 1 0 011-1z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                      
                       {/* Stop Button */}
                       <button
                         onClick={stopAudio}
-                        disabled={playingIndex !== index}
-                        className="p-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
+                        disabled={playingIndex !== index && pausedIndex !== index}
+                        className={`p-2 rounded-full transition-colors ${
+                          playingIndex === index || pausedIndex === index
+                            ? 'bg-red-600 hover:bg-red-500 text-white'
+                            : 'bg-gray-700 text-gray-500'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        title="Stop"
                       >
-                        <svg className="w-5 h-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                           <rect x="6" y="6" width="8" height="8" rx="1" />
                         </svg>
                       </button>
                       
-                      {/* Progress Bar */}
+                      {/* Progress Bar - Interactive */}
                       <div className="flex-1">
-                        <div className="relative h-2 bg-gray-700 rounded-full overflow-hidden">
+                        <div 
+                          className="relative h-3 bg-gray-700 rounded-full overflow-hidden cursor-pointer group"
+                          onClick={(e) => {
+                            if (playingIndex === index || pausedIndex === index) {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const x = e.clientX - rect.left;
+                              const percentage = (x / rect.width) * 100;
+                              seekAudio(index, Math.max(0, Math.min(100, percentage)));
+                            }
+                          }}
+                        >
                           <div
-                            className="absolute left-0 top-0 h-full bg-blue-500 transition-all duration-100"
+                            className="absolute left-0 top-0 h-full bg-blue-500 transition-all duration-100 pointer-events-none"
                             style={{ width: `${audioProgress[index] || 0}%` }}
                           />
+                          {/* Hover indicator */}
+                          <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 pointer-events-none" />
                         </div>
                       </div>
                       
