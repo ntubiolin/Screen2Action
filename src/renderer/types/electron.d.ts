@@ -28,6 +28,7 @@ export interface ElectronAPI {
     saveMarkdown: (sessionId: string, content: string) => Promise<void>;
     loadRecording: (sessionId: string) => Promise<any>;
     getScreenshotPath: (sessionId: string, timestamp: number, type: 'full' | 'thumb') => Promise<string>;
+    getScreenshotsInRange: (sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => Promise<Array<{path: string; timestamp: number}>>;
   };
   on: (channel: string, callback: Function) => void;
   removeListener: (channel: string, callback: Function) => void;

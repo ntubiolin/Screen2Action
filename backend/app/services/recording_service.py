@@ -28,6 +28,8 @@ class RecordingService:
         # NOTE: Frontend/main process now prefixes audio & markdown with YYYY_MM_DD_HH_mm_SS.
         # If backend parity is required for any future audio processing here, implement similarly.
         self.audio_sample_rate = 44100
+        # Fallback sample rates to try if preferred rate fails (macOS CoreAudio commonly supports 48000)
+        self._fallback_sample_rates = [48000, 44100, 32000]
         self.audio_chunk_seconds = 10
         self.audio_frames_per_chunk = self.audio_sample_rate * self.audio_chunk_seconds
         self._mic_buffers = []  # list[np.ndarray]
@@ -36,7 +38,8 @@ class RecordingService:
         self._sys_stream = None
         self._audio_chunk_index = 0
         self._audio_device_names = {"mic": None, "system": None}
-        self.preferred_mic_pattern: Optional[str] = None
+        # Set a sensible default built‑in mic preference (case-insensitive match)
+        self.preferred_mic_pattern: Optional[str] = "macbook pro microphone"
         self.preferred_sys_pattern: Optional[str] = None
         # Environment variable overrides or config could be added later
     
@@ -190,8 +193,11 @@ class RecordingService:
             return []
     
     def set_preferred_devices(self, mic_pattern: Optional[str], sys_pattern: Optional[str]):
-        self.preferred_mic_pattern = mic_pattern.lower() if mic_pattern else None
-        self.preferred_sys_pattern = sys_pattern.lower() if sys_pattern else None
+        # Only override if explicitly provided; keeps default MacBook Pro Microphone when None passed
+        if mic_pattern is not None:
+            self.preferred_mic_pattern = mic_pattern.lower() if mic_pattern else None
+        if sys_pattern is not None:
+            self.preferred_sys_pattern = sys_pattern.lower() if sys_pattern else None
         logger.info(f"Set preferred devices mic={self.preferred_mic_pattern} sys={self.preferred_sys_pattern}")
     
     async def _audio_recording_loop(self):
@@ -272,15 +278,61 @@ class RecordingService:
                 logger.debug(f"Sys status: {status}")
             self._sys_buffers.append(indata.copy())
 
+        # NEW: robust stream opening with fallback sample rates and partial success handling
+        mic_stream = None
+        sys_stream = None
+
+        def _try_open(device_index: int, callback, label: str):
+            """Attempt to open an InputStream with several sample rates.
+            Returns (stream, samplerate_used) or (None, None) on failure."""
+            if device_index is None:
+                return None, None
+            dev_info = None
+            try:
+                dev_info = sd.query_devices(device_index)
+            except Exception:
+                pass
+            preferred_rates = []
+            if dev_info:
+                # Put device default first if available
+                default_rate = int(dev_info.get('default_samplerate', 0) or 0)
+                if default_rate:
+                    preferred_rates.append(default_rate)
+            preferred_rates += [r for r in self._fallback_sample_rates if r not in preferred_rates]
+            last_err = None
+            for rate in preferred_rates:
+                try:
+                    sd.check_input_settings(device=device_index, channels=1, samplerate=rate, dtype='float32')
+                except Exception as ce:
+                    last_err = ce
+                    continue
+                try:
+                    stream = sd.InputStream(device=device_index, channels=1, callback=callback, samplerate=rate, dtype='float32')
+                    stream.start()
+                    logger.info(f"Opened {label} stream on device {device_index} @ {rate}Hz")
+                    return stream, rate
+                except Exception as e:
+                    last_err = e
+                    logger.warning(f"Failed opening {label} stream device={device_index} rate={rate}: {e}")
+            if last_err:
+                logger.error(f"Could not open {label} stream on device {device_index}: {last_err}")
+            return None, None
+
         try:
-            self._mic_stream = sd.InputStream(device=mic_idx, channels=1, callback=_mic_callback, samplerate=self.audio_sample_rate, dtype='float32')
-            self._mic_stream.start()
-            if sys_idx is not None:
-                if sys_idx == mic_idx:
-                    self._sys_stream = None  # We'll duplicate mic data later
-                else:
-                    self._sys_stream = sd.InputStream(device=sys_idx, channels=1, callback=_sys_callback, samplerate=self.audio_sample_rate, dtype='float32')
-                    self._sys_stream.start()
+            # Open mic first (hard requirement)
+            self._mic_stream, mic_rate = _try_open(mic_idx, _mic_callback, 'mic')
+            if self._mic_stream is None:
+                logger.error("Aborting audio capture: microphone stream could not be started.")
+                return
+            # Choose session sample rate from mic stream (resampling skipped for simplicity)
+            self.audio_sample_rate = mic_rate or self.audio_sample_rate
+            # Open system stream if distinct and available
+            if sys_idx is not None and sys_idx != mic_idx:
+                self._sys_stream, sys_rate = _try_open(sys_idx, _sys_callback, 'system')
+                if self._sys_stream is None:
+                    logger.warning("Proceeding without separate system audio; will duplicate mic for system track.")
+            else:
+                self._sys_stream = None  # duplicate mic later
         except Exception as e:
             logger.error(f"Failed to start audio streams: {e}")
             return
@@ -290,18 +342,14 @@ class RecordingService:
         try:
             while self.is_recording:
                 await asyncio.sleep(1)
-                # Just accumulate buffers, don't write chunks
-                # We'll write everything at the end
+                # Accumulate only
         except asyncio.CancelledError:
-            # On cancellation, write the complete audio file
             pass
         except Exception as e:
             logger.error(f"Audio recording error: {e}")
         finally:
-            # Write the complete audio file when recording stops
             if self._mic_buffers or self._sys_buffers:
                 await self._write_complete_audio(session_dir, start_time)
-            
             try:
                 if self._mic_stream:
                     self._mic_stream.stop(); self._mic_stream.close()

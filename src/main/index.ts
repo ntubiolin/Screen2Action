@@ -452,6 +452,51 @@ ipcMain.handle('load-recording', async (_, sessionId: string) => {
   }
 });
 
+ipcMain.handle('get-screenshots-in-range', async (_, sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => {
+  const fs = require('fs');
+  // Check both backend/recordings and recordings directories
+  const backendDir = path.join(process.cwd(), 'backend', 'recordings', sessionId, 'screenshots');
+  const frontendDir = path.join(process.cwd(), 'recordings', sessionId, 'screenshots');
+  
+  // Prioritize backend directory, fall back to frontend directory
+  let screenshotDir = fs.existsSync(backendDir) ? backendDir : frontendDir;
+  const suffix = type === 'full' ? '_full.png' : '_thumb.jpg';
+  
+  try {
+    const files = fs.readdirSync(screenshotDir);
+    const screenshots = files
+      .filter((f: string) => f.endsWith(suffix))
+      .map((f: string) => {
+        // Try new pattern: YYYY_MM_DD_HH_mm_SS_<timestamp>_full.png or _thumb.jpg
+        const newPatternMatch = f.match(/_(\d+)(_full\.png|_thumb\.jpg)$/);
+        if (newPatternMatch) {
+          return { file: f, timestamp: parseInt(newPatternMatch[1]) };
+        }
+        // Try legacy pattern: <timestamp>_full.png or _thumb.jpg
+        const legacyMatch = f.match(/^(\d+)(_full\.png|_thumb\.jpg)$/);
+        if (legacyMatch) {
+          return { file: f, timestamp: parseInt(legacyMatch[1]) };
+        }
+        return null;
+      })
+      .filter(Boolean) as { file: string; timestamp: number }[];
+    
+    // Filter screenshots within the time range
+    const screenshotsInRange = screenshots
+      .filter(s => s.timestamp >= startTime && s.timestamp <= endTime)
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map(s => ({
+        path: path.join(screenshotDir, s.file),
+        timestamp: s.timestamp
+      }));
+    
+    return screenshotsInRange;
+  } catch (error) {
+    console.error(`Error finding screenshots in range: ${error}`);
+    return [];
+  }
+});
+
 ipcMain.handle('get-screenshot-path', async (_, sessionId: string, timestamp: number, type: 'full' | 'thumb') => {
   const fs = require('fs');
   // Check both backend/recordings and recordings directories

@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveMarkdown: (sessionId: string, content: string) => ipcRenderer.invoke('save-markdown', sessionId, content),
     loadRecording: (sessionId: string) => ipcRenderer.invoke('load-recording', sessionId),
     getScreenshotPath: (sessionId: string, timestamp: number, type: 'full' | 'thumb') => ipcRenderer.invoke('get-screenshot-path', sessionId, timestamp, type),
+    getScreenshotsInRange: (sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => ipcRenderer.invoke('get-screenshots-in-range', sessionId, startTime, endTime, type),
   },
   
   // Event listeners
@@ -88,6 +89,7 @@ export interface ElectronAPI {
     saveMarkdown: (sessionId: string, content: string) => Promise<void>;
     loadRecording: (sessionId: string) => Promise<any>;
     getScreenshotPath: (sessionId: string, timestamp: number, type: 'full' | 'thumb') => Promise<string>;
+    getScreenshotsInRange: (sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => Promise<Array<{path: string; timestamp: number}>>;
   };
   on: (channel: string, callback: Function) => void;
   removeListener: (channel: string, callback: Function) => void;
