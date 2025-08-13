@@ -201,6 +201,67 @@ async def process_message(message: Message) -> Message:
                 action=message.action,
                 payload={"success": True, "result": result}
             )
+        
+        elif message.action == "get_mcp_servers":
+            servers = await mcp_service.get_mcp_servers()
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"success": True, "servers": servers}
+            )
+        
+        elif message.action == "activate_mcp_server":
+            server_name = message.payload.get("server_name")
+            success = await mcp_service.activate_mcp_server(server_name)
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"success": success}
+            )
+        
+        elif message.action == "deactivate_mcp_server":
+            await mcp_service.deactivate_mcp_server()
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"success": True}
+            )
+        
+        elif message.action == "list_mcp_tools":
+            tools = await mcp_service.list_mcp_tools()
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"success": True, "tools": tools}
+            )
+        
+        elif message.action == "execute_mcp_tool":
+            result = await mcp_service.execute_mcp_tool(
+                message.payload.get("tool_name"),
+                message.payload.get("params", {})
+            )
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"success": True, "result": result}
+            )
+        
+        elif message.action == "run_intelligent_task":
+            result = await mcp_service.run_intelligent_task(
+                message.payload.get("task"),
+                message.payload.get("context", {})
+            )
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"success": True, "result": result}
+            )
             
         elif message.action == "list_audio_devices":
             devices = recording_service.list_audio_devices()

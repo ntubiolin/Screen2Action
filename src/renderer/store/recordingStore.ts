@@ -15,6 +15,7 @@ interface RecordingStore {
   currentSessionId: string | null;
   isRecording: boolean;
   recordingStartTime: number | null;
+  recordingDuration: number | null; // added
   audioDevices: any[];
   selectedMic: string | null;
   selectedSystem: string | null;
@@ -27,6 +28,7 @@ interface RecordingStore {
   setSessionId: (id: string | null) => void;
   setRecording: (status: boolean) => void;
   setRecordingStartTime: (time: number | null) => void;
+  setRecordingDuration: (duration: number | null) => void; // added
   setAudioDevices: (list: any[]) => void;
   setSelectedMic: (v: string | null) => void;
   setSelectedSystem: (v: string | null) => void;
@@ -37,6 +39,7 @@ export const useRecordingStore = create<RecordingStore>((set) => ({
   currentSessionId: null,
   isRecording: false,
   recordingStartTime: null,
+  recordingDuration: null,
   audioDevices: [],
   selectedMic: null,
   selectedSystem: null,
@@ -74,6 +77,10 @@ export const useRecordingStore = create<RecordingStore>((set) => ({
   setRecordingStartTime: (time) =>
     set(() => ({
       recordingStartTime: time,
+    })),
+  setRecordingDuration: (duration) =>
+    set(() => ({
+      recordingDuration: duration,
     })),
   
   setAudioDevices: (list) =>

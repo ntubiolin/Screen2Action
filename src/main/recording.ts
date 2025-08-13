@@ -49,28 +49,61 @@ export class RecordingManager {
     return this.sessionId;
   }
 
-  async stopRecording(): Promise<void> {
+  async stopRecording(): Promise<{ duration: number; sessionId: string | null }> {
     if (!this.isRecording) {
       throw new Error('Not recording');
     }
 
+    // Take a final screenshot before stopping (best-effort)
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 1920, height: 1080 },
+      });
+      if (sources.length > 0) {
+        const finalTimestamp = Date.now() - this.startTime;
+        const screenshot = sources[0].thumbnail;
+        const now = new Date();
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const prefix = `${now.getFullYear()}_${pad(now.getMonth()+1)}_${pad(now.getDate())}_${pad(now.getHours())}_${pad(now.getMinutes())}_${pad(now.getSeconds())}`;
+        const fullPath = path.join(
+          this.sessionPath,
+            'screenshots',
+            `${prefix}_${finalTimestamp}_full.png`
+        );
+        const thumbPath = path.join(
+          this.sessionPath,
+          'screenshots',
+          `${prefix}_${finalTimestamp}_thumb.jpg`
+        );
+        try { fs.writeFileSync(fullPath, screenshot.toPNG()); } catch {}
+        try { fs.writeFileSync(thumbPath, screenshot.resize({ width: 320, height: 180 }).toJPEG(80)); } catch {}
+      }
+    } catch (e) {
+      console.warn('Final screenshot capture failed:', e);
+    }
+
     this.isRecording = false;
-    
+
     if (this.screenshotInterval) {
       clearInterval(this.screenshotInterval);
       this.screenshotInterval = null;
     }
-    
+
     // Update metadata with end time
     const metadataPath = path.join(this.sessionPath, 'metadata.json');
     const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
     metadata.endTime = new Date().toISOString();
     metadata.duration = Date.now() - this.startTime;
-    
     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-    
+
+    const duration = metadata.duration;
+    const sessionId = this.sessionId;
+
     this.sessionId = null;
     this.startTime = 0;
+
+    return { duration, sessionId };
   }
 
   private startScreenshotCapture() {

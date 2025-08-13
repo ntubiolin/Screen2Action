@@ -1,14 +1,17 @@
 import logging
-from typing import Dict, Any, Callable, Optional
+from typing import Dict, Any, Callable, Optional, List
 import json
+import asyncio
+from .mcp_client import MCPClient, MCPServerConfig
 
 logger = logging.getLogger(__name__)
 
 class MCPService:
-    """Model Context Protocol (MCP) Tool Service"""
+    """Model Context Protocol (MCP) Tool Service with enhanced MCP client integration"""
     
     def __init__(self):
         self.tools: Dict[str, Callable] = {}
+        self.mcp_client = MCPClient()
         self._register_builtin_tools()
     
     def _register_builtin_tools(self):
@@ -166,4 +169,67 @@ class MCPService:
     
     def is_healthy(self) -> bool:
         """Check if service is healthy"""
-        return len(self.tools) > 0
+        return len(self.tools) > 0 or self.mcp_client.is_enabled()
+    
+    # MCP Client specific methods
+    
+    async def get_mcp_servers(self) -> List[Dict[str, Any]]:
+        """Get list of available MCP servers."""
+        return self.mcp_client.get_server_info()
+    
+    async def activate_mcp_server(self, server_name: str) -> bool:
+        """Activate a specific MCP server."""
+        return await self.mcp_client.activate_server(server_name)
+    
+    async def deactivate_mcp_server(self):
+        """Deactivate the currently active MCP server."""
+        await self.mcp_client.deactivate_server()
+    
+    async def list_mcp_tools(self) -> List[Dict[str, Any]]:
+        """List tools available from the active MCP server."""
+        return await self.mcp_client.list_tools()
+    
+    async def execute_mcp_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a tool on the active MCP server."""
+        return await self.mcp_client.execute_tool(tool_name, params)
+    
+    async def run_intelligent_task(self, task: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Run an intelligent task using MCP agent."""
+        return await self.mcp_client.run_intelligent_task(task, context)
+    
+    def add_mcp_server(self, name: str, command: str, args: List[str], 
+                       env: Dict[str, str] = None, description: str = "", icon: str = "🔧") -> bool:
+        """Add a new MCP server configuration."""
+        try:
+            config = MCPServerConfig(
+                name=name,
+                command=command,
+                args=args,
+                env=env,
+                description=description,
+                icon=icon,
+                enabled=True
+            )
+            self.mcp_client.add_server(config)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to add MCP server: {e}")
+            return False
+    
+    def remove_mcp_server(self, name: str) -> bool:
+        """Remove an MCP server configuration."""
+        try:
+            self.mcp_client.remove_server(name)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to remove MCP server: {e}")
+            return False
+    
+    def update_mcp_server(self, name: str, **kwargs) -> bool:
+        """Update an MCP server configuration."""
+        try:
+            self.mcp_client.update_server(name, **kwargs)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update MCP server: {e}")
+            return False

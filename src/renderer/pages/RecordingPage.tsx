@@ -19,7 +19,7 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
   const sessionIdRef = useRef<string | null>(null);
   const recordingStartTimeRef = useRef<number>(0);
   
-  const { addNote, clearNotes, audioDevices, setAudioDevices, selectedMic, selectedSystem, setSelectedMic, setSelectedSystem } = useRecordingStore();
+  const { addNote, clearNotes, audioDevices, setAudioDevices, selectedMic, selectedSystem, setSelectedMic, setSelectedSystem, setRecordingDuration } = useRecordingStore();
 
   useEffect(() => {
     loadSources();
@@ -112,9 +112,12 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
 
   const stopRecording = async () => {
     try {
-      await window.electronAPI.recording.stop();
+      const stopResult = await window.electronAPI.recording.stop();
       setIsRecording(false);
       setAudioEnabled(false);
+      if (stopResult?.duration) {
+        setRecordingDuration(stopResult.duration);
+      }
       
       if (sessionIdRef.current) {
         // Save markdown notes to file
@@ -128,30 +131,57 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
         }
         
         // Parse notes with timestamps from markdown
-        const noteEntries = notes.split('\n').filter(line => line.trim());
-        noteEntries.forEach((note, index) => {
-          // Try to extract timestamp from note format like "[00:30] Note content"
-          const timestampMatch = note.match(/^\[(\d{2}):(\d{2})\]\s*(.*)/);
+        // New logic: split notes into sections using Markdown H1 headings (lines starting with "# ")
+        const rawLines = notes.split('\n');
+        const sections: string[] = [];
+        let currentSection: string[] = [];
+        for (const line of rawLines) {
+          if (line.startsWith('# ')) {
+            if (currentSection.length) {
+              sections.push(currentSection.join('\n').trim());
+            }
+            currentSection = [line];
+          } else {
+            // Only accumulate lines after the first H1 appears
+            if (currentSection.length) {
+              currentSection.push(line);
+            }
+          }
+        }
+        if (currentSection.length) {
+          sections.push(currentSection.join('\n').trim());
+        }
+
+        // Fallback: if no H1 headings were found, revert to previous line-based splitting
+        const noteEntries = sections.length > 0
+          ? sections
+          : rawLines.filter(line => line.trim());
+
+        noteEntries.forEach((entry, index) => {
+          // Try to extract timestamp from formats like:
+          //   [00:30] Some content
+          //   # [00:30] Heading title
+          const timestampMatch = entry.match(/^#?\s*\[(\d{2}):(\d{2})\]\s*([\s\S]*)/);
           let timestamp: number;
-          let content: string;
-          
-          if (timestampMatch) {
-            // Calculate timestamp from [mm:ss] format
+          let content: string = entry;
+
+            if (timestampMatch) {
             const minutes = parseInt(timestampMatch[1]);
             const seconds = parseInt(timestampMatch[2]);
-            timestamp = (minutes * 60 + seconds) * 1000; // Convert to milliseconds
-            content = timestampMatch[3];
+            timestamp = (minutes * 60 + seconds) * 1000;
+            // Remove just the leading [MM:SS] (and any extra spaces) while preserving a leading '# ' if present
+            content = entry
+              .replace(/^(#?)(\s*)\[(\d{2}):(\d{2})\]\s*/, (_m, hash) => hash ? '# ' : '')
+              .trim();
           } else {
-            // If no timestamp format found, calculate based on position
-            // Distribute notes evenly across recording duration
+            // Distribute timestamps evenly across total recording time as before
             const recordingDuration = Date.now() - recordingStartTimeRef.current;
             timestamp = Math.floor((index / Math.max(noteEntries.length - 1, 1)) * recordingDuration);
-            content = note;
           }
-          
+
           addNote({
-            content: content,
-            timestamp: timestamp,
+            content,
+            timestamp,
           });
         });
         

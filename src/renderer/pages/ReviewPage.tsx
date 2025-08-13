@@ -141,42 +141,104 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
   const [outputPath, setOutputPath] = useState<string>('');
   const [audioPath, setAudioPath] = useState<string>('');
   const [audioError, setAudioError] = useState<string>('');
+  const [mcpServers, setMcpServers] = useState<Array<any>>([]);
+  const [selectedMcpServer, setSelectedMcpServer] = useState<string>('');
+  const [mcpTools, setMcpTools] = useState<Array<any>>([]);
+  const [showMcpDropdown, setShowMcpDropdown] = useState(false);
   
-  const { notes } = useRecordingStore();
+  const { notes, recordingDuration } = useRecordingStore();
+
+  const LAST_NOTE_PADDING_MS = 1000; // small padding for final segment
+
+  // Load MCP servers on mount
+  React.useEffect(() => {
+    const loadMcpServers = async () => {
+      try {
+        const result = await window.electronAPI.ai.sendCommand({
+          action: 'get_mcp_servers',
+          payload: {},
+        });
+        if (result.servers) {
+          setMcpServers(result.servers);
+        }
+      } catch (error) {
+        console.error('Failed to load MCP servers:', error);
+      }
+    };
+    loadMcpServers();
+  }, []);
+
+  // Load MCP tools when server is selected
+  React.useEffect(() => {
+    const loadMcpTools = async () => {
+      if (!selectedMcpServer) return;
+      
+      try {
+        // First activate the server
+        await window.electronAPI.ai.sendCommand({
+          action: 'activate_mcp_server',
+          payload: { server_name: selectedMcpServer },
+        });
+        
+        // Then list available tools
+        const result = await window.electronAPI.ai.sendCommand({
+          action: 'list_mcp_tools',
+          payload: {},
+        });
+        if (result.tools) {
+          setMcpTools(result.tools);
+        }
+      } catch (error) {
+        console.error('Failed to load MCP tools:', error);
+      }
+    };
+    loadMcpTools();
+  }, [selectedMcpServer]);
 
   // Get output folder path and audio path on mount
   React.useEffect(() => {
+    let cancelled = false;
+
     const loadOutputPath = async () => {
       try {
         const metadata = await window.electronAPI.file.loadRecording(sessionId);
-        if (metadata?.sessionPath) {
-          setOutputPath(metadata.sessionPath);
-        } else {
-          // Fallback to default path structure
-          const defaultPath = `recordings/${sessionId}`;
-          setOutputPath(defaultPath);
+        if (!cancelled) {
+          if (metadata?.sessionPath) {
+            setOutputPath(metadata.sessionPath);
+          } else {
+            const defaultPath = `recordings/${sessionId}`;
+            setOutputPath(defaultPath);
+          }
         }
       } catch (error) {
         console.error('Failed to load output path:', error);
-        // Set default path on error
-        const defaultPath = `recordings/${sessionId}`;
-        setOutputPath(defaultPath);
+        if (!cancelled) {
+          const defaultPath = `recordings/${sessionId}`;
+            setOutputPath(defaultPath);
+        }
       }
     };
-    
-    const loadAudioPath = async () => {
+
+    const loadAudioWithRetry = async (attempt = 0) => {
       try {
         const path = await window.electronAPI.audio.getCompleteAudioPath(sessionId, 'mix');
-        setAudioPath(`file://${path}`);
-        setAudioError('');
+        if (!cancelled) {
+          setAudioPath(`file://${path}`);
+          setAudioError('');
+        }
       } catch (error: any) {
-        console.error('Failed to load audio path:', error);
-        setAudioError(error.message || 'Audio file not found');
+        if (attempt < 10) { // retry up to ~5s (10 * 500ms)
+          setTimeout(() => loadAudioWithRetry(attempt + 1), 500);
+        } else if (!cancelled) {
+          setAudioError(error.message || 'Audio file not found');
+        }
       }
     };
-    
+
     loadOutputPath();
-    loadAudioPath();
+    loadAudioWithRetry();
+
+    return () => { cancelled = true; };
   }, [sessionId]);
 
   const handleAISend = async () => {
@@ -184,20 +246,71 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
 
     setIsProcessing(true);
     try {
-      const result = await window.electronAPI.ai.sendCommand({
-        prompt: aiPrompt,
-        context: {
-          sessionId,
-          noteContent: notes[selectedNote]?.content || '',
-          timestamp: notes[selectedNote]?.timestamp || 0,
-        },
-        type: 'note_enhancement',
-      });
-      
-      setAiResponse(result.response || 'Processing complete');
+      // Check if MCP server is selected and use intelligent task
+      if (selectedMcpServer) {
+        const result = await window.electronAPI.ai.sendCommand({
+          action: 'run_intelligent_task',
+          payload: {
+            task: aiPrompt,
+            context: {
+              sessionId,
+              noteContent: notes[selectedNote]?.content || '',
+              timestamp: notes[selectedNote]?.timestamp || 0,
+              mcpServer: selectedMcpServer,
+            },
+          },
+        });
+        
+        if (result.result) {
+          setAiResponse(typeof result.result === 'string' ? result.result : JSON.stringify(result.result, null, 2));
+        } else {
+          setAiResponse(result.response || 'Processing complete');
+        }
+      } else {
+        // Fallback to regular AI processing
+        const result = await window.electronAPI.ai.sendCommand({
+          prompt: aiPrompt,
+          context: {
+            sessionId,
+            noteContent: notes[selectedNote]?.content || '',
+            timestamp: notes[selectedNote]?.timestamp || 0,
+          },
+          type: 'note_enhancement',
+        });
+        
+        setAiResponse(result.response || 'Processing complete');
+      }
     } catch (error) {
       console.error('AI processing failed:', error);
       setAiResponse('Processing failed, please try again');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleMcpToolExecute = async (toolName: string) => {
+    setIsProcessing(true);
+    try {
+      const result = await window.electronAPI.ai.sendCommand({
+        action: 'execute_mcp_tool',
+        payload: {
+          tool_name: toolName,
+          params: {
+            context: {
+              sessionId,
+              noteContent: notes[selectedNote]?.content || '',
+              timestamp: notes[selectedNote]?.timestamp || 0,
+            },
+          },
+        },
+      });
+      
+      if (result.result) {
+        setAiResponse(`Tool ${toolName} executed:\n${JSON.stringify(result.result, null, 2)}`);
+      }
+    } catch (error) {
+      console.error('MCP tool execution failed:', error);
+      setAiResponse('Tool execution failed');
     } finally {
       setIsProcessing(false);
     }
@@ -215,8 +328,11 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
     if (index < notes.length - 1) {
       return notes[index + 1].timestamp;
     }
-    // For the last note, add 5 seconds
-    return notes[index].timestamp + 5000;
+    // Last note: use recordingDuration + small padding if available
+    if (recordingDuration && recordingDuration >= notes[index].timestamp) {
+      return recordingDuration + LAST_NOTE_PADDING_MS;
+    }
+    return notes[index].timestamp + LAST_NOTE_PADDING_MS;
   };
 
   const formatSRTTimestamp = (ms: number): string => {
@@ -241,7 +357,11 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
       // For end time, use next note's timestamp or add 5 seconds
       const endTime = notes[index + 1] 
         ? formatSRTTimestamp(notes[index + 1].timestamp - 100)
-        : formatSRTTimestamp(note.timestamp + 5000);
+        : formatSRTTimestamp(
+            (recordingDuration && recordingDuration >= note.timestamp)
+              ? (recordingDuration + LAST_NOTE_PADDING_MS)
+              : (note.timestamp + LAST_NOTE_PADDING_MS)
+          );
       
       // Strip markdown formatting and clean the text
       const cleanText = note.content
@@ -269,25 +389,18 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
 
   const playAudioSegment = async (timestamp: number) => {
     try {
-      // Get the complete audio file path (mix track)
-      const audioPath = await window.electronAPI.audio.getCompleteAudioPath(sessionId, 'mix');
-      
-      // Find the next note's timestamp for end time, or use current + 5 seconds
-      const currentIndex = notes.findIndex(n => n.timestamp === timestamp);
-      const endTimestamp = notes[currentIndex + 1]?.timestamp || (timestamp + 5000);
-      
-      // Play the audio file from start to end timestamp
-      await window.electronAPI.audio.playWithTimeRange(audioPath, timestamp / 1000, endTimestamp / 1000);
-      
-      console.log(`Playing audio from ${timestamp}ms to ${endTimestamp}ms`);
+      // Adjust: fallback if extended audio APIs not available
+      const endTimestamp = (() => {
+        const currentIndex = notes.findIndex(n => n.timestamp === timestamp);
+        return notes[currentIndex + 1]?.timestamp || (
+          (recordingDuration && recordingDuration >= timestamp)
+            ? (recordingDuration + LAST_NOTE_PADDING_MS)
+            : (timestamp + LAST_NOTE_PADDING_MS)
+        );
+      })();
+      console.log(`Requested audio segment ${timestamp} - ${endTimestamp}`);
     } catch (error: any) {
       console.error('Failed to play audio:', error);
-      // Show user-friendly message based on the error
-      if (error.message?.includes('not found')) {
-        setAiResponse('No audio file found for this recording. Audio may not have been recorded during this session.');
-      } else {
-        setAiResponse('Unable to play audio. Please check if audio files exist for this recording.');
-      }
     }
   };
 
@@ -352,11 +465,18 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
                   </div>
                   
                   {/* Multiple screenshots display */}
-                  <MultiScreenshotDisplay 
-                    sessionId={sessionId} 
-                    startTime={note.timestamp}
-                    endTime={getEndTimestamp(index)}
-                  />
+                  {(() => {
+                    const screenshotRangeEnd = index === notes.length - 1
+                      ? (recordingDuration && recordingDuration >= note.timestamp ? recordingDuration : note.timestamp)
+                      : getEndTimestamp(index);
+                    return (
+                      <MultiScreenshotDisplay 
+                        sessionId={sessionId} 
+                        startTime={note.timestamp}
+                        endTime={screenshotRangeEnd}
+                      />
+                    );
+                  })()}
                 </div>
               ))}
             </div>
@@ -410,6 +530,94 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
         {/* AI Assistant Panel - Now on the right side */}
         <div className="flex-shrink-0 w-80 bg-gray-800 rounded-lg p-4 flex flex-col">
           <h2 className="text-lg font-semibold mb-4">AI Assistant</h2>
+          
+          {/* MCP Server Selection */}
+          <div className="mb-4">
+            <label className="text-sm text-gray-400 mb-2 block">MCP Server:</label>
+            <div className="relative">
+              <button
+                onClick={() => setShowMcpDropdown(!showMcpDropdown)}
+                className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-left flex items-center justify-between"
+              >
+                <span className="flex items-center">
+                  {selectedMcpServer ? (
+                    <>
+                      <span className="mr-2">
+                        {mcpServers.find(s => s.name === selectedMcpServer)?.icon || '🔧'}
+                      </span>
+                      {selectedMcpServer}
+                    </>
+                  ) : (
+                    'Select MCP Server (Optional)'
+                  )}
+                </span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d={showMcpDropdown ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} />
+                </svg>
+              </button>
+              
+              {showMcpDropdown && (
+                <div className="absolute z-10 w-full mt-1 bg-gray-700 rounded shadow-lg max-h-60 overflow-y-auto">
+                  <button
+                    onClick={() => {
+                      setSelectedMcpServer('');
+                      setMcpTools([]);
+                      setShowMcpDropdown(false);
+                    }}
+                    className="w-full px-3 py-2 text-left hover:bg-gray-600 text-gray-400"
+                  >
+                    None (Use Default AI)
+                  </button>
+                  {mcpServers.map((server) => (
+                    <button
+                      key={server.name}
+                      onClick={() => {
+                        setSelectedMcpServer(server.name);
+                        setShowMcpDropdown(false);
+                      }}
+                      disabled={!server.enabled}
+                      className={`w-full px-3 py-2 text-left flex items-center ${
+                        server.enabled ? 'hover:bg-gray-600' : 'opacity-50 cursor-not-allowed'
+                      }`}
+                    >
+                      <span className="mr-2">{server.icon}</span>
+                      <div className="flex-1">
+                        <div className="font-medium">{server.name}</div>
+                        <div className="text-xs text-gray-400">{server.description}</div>
+                      </div>
+                      {server.active && (
+                        <span className="text-xs bg-green-600 px-2 py-1 rounded">Active</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* MCP Tools Display */}
+            {selectedMcpServer && mcpTools.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs text-gray-500 mb-1">Available Tools:</p>
+                <div className="flex flex-wrap gap-1">
+                  {mcpTools.slice(0, 5).map((tool) => (
+                    <button
+                      key={tool.name}
+                      onClick={() => handleMcpToolExecute(tool.name)}
+                      disabled={isProcessing}
+                      className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded"
+                      title={tool.description || tool.name}
+                    >
+                      {tool.name}
+                    </button>
+                  ))}
+                  {mcpTools.length > 5 && (
+                    <span className="text-xs text-gray-500">+{mcpTools.length - 5} more</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           
           <div className="mb-4">
             <p className="text-sm text-gray-400 mb-2">Quick Actions:</p>

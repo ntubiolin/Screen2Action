@@ -15,7 +15,7 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 - Natural language command processing
 - Support for annotation, save, copy operations
 - OCR text recognition
-- MCP tool integration
+- MCP (Model Context Protocol) tool integration
 
 ### 📁 File Management
 - Custom output path selection for recordings
@@ -121,6 +121,7 @@ In the third column of the review interface, you can:
 - Professionally rewrite content
 - Extract action items
 - Translate to other languages
+- Use MCP servers for enhanced capabilities (filesystem, web search, browser automation, etc.)
 
 ## Project Structure
 
@@ -204,9 +205,65 @@ Pull Requests and Issues are welcome!
 
 For questions or suggestions, please contact via GitHub Issues.
 
-## Recent Updates (2025-08-12)
+## MCP (Model Context Protocol) Integration
+
+### Overview
+Screen2Action now supports MCP servers for enhanced AI capabilities. MCP allows the AI assistant to interact with various tools and services, providing more powerful and context-aware assistance.
+
+### Available MCP Servers
+- **Filesystem** (📁): Read, write, and manage files
+- **Memory** (🧠): Create and query in-memory knowledge graphs
+- **Puppeteer** (🎭): Automate web browsers for testing and scraping
+- **Web Search** (🔍): Search the web using Brave Search API (requires API key)
+- **GitHub** (🐙): Interact with GitHub repositories (requires token)
+- **PostgreSQL** (🐘): Query and manage PostgreSQL databases (requires connection string)
+
+### Configuration
+1. Copy the environment file:
+   ```bash
+   cp backend/.env.example backend/.env
+   ```
+
+2. Configure your preferred LLM (required for intelligent MCP tasks):
+   - **OpenAI**: Set `OPENAI_API_KEY` and `OPENAI_MODEL`
+   - **Ollama**: Set `OLLAMA_MODEL` and ensure Ollama is running locally
+
+3. Configure MCP servers (optional):
+   - Edit `backend/config/mcp_servers.json` to enable/disable servers
+   - Add API keys for specific servers in `.env` file
+
+### Using MCP in the AI Assistant
+1. In the review interface, open the AI Assistant panel (Column C)
+2. Select an MCP server from the dropdown menu
+3. Enter your task or query in the text input
+4. The AI will use the selected MCP server to process your request intelligently
+
+### Adding Custom MCP Servers
+Edit `backend/config/mcp_servers.json` to add custom MCP servers:
+```json
+{
+  "servers": {
+    "custom-server": {
+      "command": "path/to/server",
+      "args": ["--option", "value"],
+      "description": "My custom MCP server",
+      "icon": "🚀",
+      "enabled": true
+    }
+  }
+}
+```
+
+## Recent Updates (2025-08-13)
 
 ### Latest Changes
+- **Added**: MCP (Model Context Protocol) support with multiple server options
+- **Added**: MCP server dropdown selection in AI Assistant panel
+- **Added**: Intelligent task execution using mcp-use package
+- **Added**: Filtered agent wrapper for handling large data (screenshots)
+- **Added**: Configuration management for MCP servers
+
+### Previous Updates (2025-08-12)
 - **Enhanced**: Continuous audio recording - Records one complete audio file from start to end of session
 - **Added**: BlackHole device detection and verification for system audio capture
 - **Fixed**: Markdown timestamp recording - Now supports [MM:SS] format in notes for precise timing

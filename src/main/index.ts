@@ -158,7 +158,6 @@ ipcMain.handle('start-recording', async (_, screenId: string) => {
 ipcMain.handle('stop-recording', async () => {
   if (recordingManager) {
     const sessionId = recordingManager.getCurrentSessionId();
-    
     // Stop audio recording in Python backend
     if (wsServer) {
       try {
@@ -170,13 +169,10 @@ ipcMain.handle('stop-recording', async () => {
         console.log('Stopped audio recording in backend');
       } catch (error: any) {
         console.warn('Python backend not connected for stopping audio:', error.message);
-        // Continue even if backend fails
       }
     }
-    
     const result = await recordingManager.stopRecording();
-    // Removed: mp3 conversion trigger
-    return result;
+    return result; // { duration, sessionId }
   }
   throw new Error('Recording manager not initialized');
 });
