@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
+import Editor from '@monaco-editor/react';
 import { useRecordingStore } from '../store/recordingStore';
 
 interface ReviewPageProps {
@@ -90,8 +90,10 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
   const [audioProgress, setAudioProgress] = useState<{ [key: number]: number }>({});
   const [segmentStartTimes, setSegmentStartTimes] = useState<{ [key: number]: number }>({});
   const [segmentDurations, setSegmentDurations] = useState<{ [key: number]: number }>({});
+  const [isDragging, setIsDragging] = useState<number | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const progressIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const progressBarRefs = React.useRef<{ [key: number]: HTMLDivElement | null }>({});
   
   const { notes, recordingDuration } = useRecordingStore();
 
@@ -198,6 +200,40 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
       }
     };
   }, [sessionId]);
+
+  // Global mouse event handlers for dragging
+  React.useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (isDragging !== null) {
+        const progressBar = progressBarRefs.current[isDragging];
+        if (progressBar && (playingIndex === isDragging || pausedIndex === isDragging)) {
+          const rect = progressBar.getBoundingClientRect();
+          const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+          const percentage = (x / rect.width) * 100;
+          seekAudio(isDragging, Math.max(0, Math.min(100, percentage)));
+        }
+      }
+    };
+
+    const handleGlobalMouseUp = () => {
+      if (isDragging !== null) {
+        setIsDragging(null);
+      }
+    };
+
+    if (isDragging !== null) {
+      document.addEventListener('mousemove', handleGlobalMouseMove);
+      document.addEventListener('mouseup', handleGlobalMouseUp);
+      // Prevent text selection while dragging
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+      document.body.style.userSelect = '';
+    };
+  }, [isDragging, playingIndex, pausedIndex, segmentStartTimes, segmentDurations]);
 
   const handleAISend = async () => {
     if (!aiPrompt.trim()) return;
@@ -489,19 +525,20 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
         </div>
       )}
       
-      <div className="flex-1 flex space-x-4">
+      <div className="flex-1 flex space-x-4 overflow-hidden">
         {/* Main Content Area - Expanded Markdown Editor */}
-        <div className="flex-1 bg-gray-800 rounded-lg p-6 overflow-y-auto">
-          <h2 className="text-xl font-semibold mb-6">Notes & Media</h2>
+        <div className="flex-1 bg-gray-800 rounded-lg flex flex-col overflow-hidden">
+          <h2 className="text-xl font-semibold px-6 pt-6 pb-4">Notes & Media</h2>
           
-          {/* Audio Error Display */}
-          {audioError && (
-            <div className="bg-red-900/20 border border-red-700 rounded-lg p-3 text-red-400 text-sm mb-4">
-              {audioError}
-            </div>
-          )}
-          
-          {notes.length > 0 ? (
+          <div className="flex-1 overflow-y-auto px-6 pb-6">
+            {/* Audio Error Display */}
+            {audioError && (
+              <div className="bg-red-900/20 border border-red-700 rounded-lg p-3 text-red-400 text-sm mb-4">
+                {audioError}
+              </div>
+            )}
+            
+            {notes.length > 0 ? (
             <div className="space-y-6">
               {notes.map((note, index) => (
                 <div
@@ -581,25 +618,59 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
                         </svg>
                       </button>
                       
-                      {/* Progress Bar - Interactive */}
+                      {/* Progress Bar - Interactive with Drag Support */}
                       <div className="flex-1">
                         <div 
+                          ref={(el) => { progressBarRefs.current[index] = el; }}
                           className="relative h-3 bg-gray-700 rounded-full overflow-hidden cursor-pointer group"
-                          onClick={(e) => {
+                          onMouseDown={(e) => {
                             if (playingIndex === index || pausedIndex === index) {
+                              e.preventDefault();
+                              setIsDragging(index);
                               const rect = e.currentTarget.getBoundingClientRect();
                               const x = e.clientX - rect.left;
                               const percentage = (x / rect.width) * 100;
                               seekAudio(index, Math.max(0, Math.min(100, percentage)));
                             }
                           }}
+                          onMouseMove={(e) => {
+                            if (isDragging === index && (playingIndex === index || pausedIndex === index)) {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const x = e.clientX - rect.left;
+                              const percentage = (x / rect.width) * 100;
+                              seekAudio(index, Math.max(0, Math.min(100, percentage)));
+                            }
+                          }}
+                          onMouseUp={() => {
+                            if (isDragging === index) {
+                              setIsDragging(null);
+                            }
+                          }}
+                          onMouseLeave={() => {
+                            if (isDragging === index) {
+                              setIsDragging(null);
+                            }
+                          }}
                         >
                           <div
-                            className="absolute left-0 top-0 h-full bg-blue-500 transition-all duration-100 pointer-events-none"
-                            style={{ width: `${audioProgress[index] || 0}%` }}
+                            className="absolute left-0 top-0 h-full bg-blue-500 pointer-events-none"
+                            style={{ 
+                              width: `${audioProgress[index] || 0}%`,
+                              transition: isDragging === index ? 'none' : 'width 100ms'
+                            }}
                           />
                           {/* Hover indicator */}
                           <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 pointer-events-none" />
+                          {/* Drag handle - visible on hover or when dragging */}
+                          {(playingIndex === index || pausedIndex === index) && (
+                            <div 
+                              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg pointer-events-none group-hover:opacity-100 transition-opacity"
+                              style={{ 
+                                left: `calc(${audioProgress[index] || 0}% - 8px)`,
+                                opacity: isDragging === index ? 1 : 0
+                              }}
+                            />
+                          )}
                         </div>
                       </div>
                       
@@ -610,29 +681,55 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
                     </div>
                   </div>
                   
-                  {/* Markdown Content */}
+                  {/* Monaco Editor for Markdown Content */}
                   <div
-                    className="p-6 cursor-pointer"
+                    className="cursor-pointer"
                     onClick={() => setSelectedNote(index)}
                   >
-                    <div className="prose prose-invert max-w-none">
-                      <ReactMarkdown>{note.content}</ReactMarkdown>
-                    </div>
+                    <Editor
+                      height="200px"
+                      defaultLanguage="markdown"
+                      value={note.content}
+                      theme="vs-dark"
+                      options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        wordWrap: 'on',
+                        lineNumbers: 'off',
+                        glyphMargin: false,
+                        folding: false,
+                        lineDecorationsWidth: 0,
+                        lineNumbersMinChars: 0,
+                        renderLineHighlight: 'none',
+                        scrollbar: {
+                          vertical: 'auto',
+                          horizontal: 'hidden',
+                          verticalScrollbarSize: 10
+                        },
+                        overviewRulerLanes: 0,
+                        hideCursorInOverviewRuler: true,
+                        overviewRulerBorder: false,
+                        padding: { top: 16, bottom: 16 }
+                      }}
+                    />
                   </div>
                 </div>
               ))}
             </div>
-          ) : (
-            <p className="text-gray-400 text-center py-8">No notes available</p>
-          )}
+            ) : (
+              <p className="text-gray-400 text-center py-8">No notes available</p>
+            )}
+          </div>
         </div>
 
         {/* Right Sidebar - AI Assistant Panel */}
-        <div className="flex-shrink-0 w-96 bg-gray-800 rounded-lg p-4 flex flex-col">
-          <h2 className="text-lg font-semibold mb-4">AI Assistant</h2>
+        <div className="flex-shrink-0 w-96 bg-gray-800 rounded-lg flex flex-col overflow-hidden">
+          <h2 className="text-lg font-semibold px-4 pt-4 pb-2">AI Assistant</h2>
           
-          {/* MCP Server Selection */}
-          <div className="mb-4">
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            {/* MCP Server Selection */}
+            <div className="mb-4">
             <label className="text-sm text-gray-400 mb-2 block">MCP Server:</label>
             <div className="relative">
               <button
@@ -717,9 +814,9 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
                 </div>
               </div>
             )}
-          </div>
-          
-          <div className="mb-4">
+            </div>
+            
+            <div className="mb-4">
             <p className="text-sm text-gray-400 mb-2">Quick Actions:</p>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -753,33 +850,58 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
                 Save as SRT
               </button>
             </div>
-          </div>
+            </div>
 
-          <div className="flex-1 flex flex-col">
-            <textarea
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="Enter command or question..."
-              className="flex-1 bg-gray-900 text-white px-3 py-2 rounded resize-none mb-3"
-              disabled={isProcessing}
-            />
-            
-            <button
-              onClick={handleAISend}
-              disabled={isProcessing || !aiPrompt.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded mb-3"
-            >
-              {isProcessing ? 'Processing...' : 'Send'}
-            </button>
+            <div className="flex flex-col">
+              <textarea
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="Enter command or question..."
+                className="bg-gray-900 text-white px-3 py-2 rounded resize-none mb-3 h-24"
+                disabled={isProcessing}
+              />
+              
+              <button
+                onClick={handleAISend}
+                disabled={isProcessing || !aiPrompt.trim()}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded mb-3"
+              >
+                {isProcessing ? 'Processing...' : 'Send'}
+              </button>
 
-            {aiResponse && (
-              <div className="flex-1 bg-gray-900 rounded p-3 overflow-y-auto">
+              {aiResponse && (
+                <div className="bg-gray-900 rounded p-3 overflow-y-auto max-h-64">
                 <h3 className="text-sm font-semibold text-gray-400 mb-2">AI Response:</h3>
-                <div className="prose prose-invert prose-sm max-w-none">
-                  <ReactMarkdown>{aiResponse}</ReactMarkdown>
+                <Editor
+                  height="200px"
+                  defaultLanguage="markdown"
+                  value={aiResponse}
+                  theme="vs-dark"
+                  options={{
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    lineNumbers: 'off',
+                    glyphMargin: false,
+                    folding: false,
+                    lineDecorationsWidth: 0,
+                    lineNumbersMinChars: 0,
+                    renderLineHighlight: 'none',
+                    scrollbar: {
+                      vertical: 'auto',
+                      horizontal: 'hidden',
+                      verticalScrollbarSize: 10
+                    },
+                    overviewRulerLanes: 0,
+                    hideCursorInOverviewRuler: true,
+                    overviewRulerBorder: false,
+                    padding: { top: 8, bottom: 8 }
+                  }}
+                />
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </div>
