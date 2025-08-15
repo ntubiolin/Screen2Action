@@ -21,6 +21,107 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
   
   const { addNote, clearNotes, audioDevices, setAudioDevices, selectedMic, selectedSystem, setSelectedMic, setSelectedSystem, setRecordingDuration } = useRecordingStore();
 
+  // --- Heading timestamp (non-intrusive) ---
+  const headingLineRegex = /^#{1,6}\s+/; // H1~H6
+  const editorRef = useRef<any>(null);
+  const monacoRef = useRef<any>(null);
+  const contentWidgetsRef = useRef<any[]>([]);
+
+  const headingTsRef = useRef<Record<string, number>>({});
+  const prevHeadingKeysRef = useRef<string[]>([]);
+
+  const nowRelativeMs = () => Math.max(0, Date.now() - recordingStartTimeRef.current);
+
+  // Build stable-ish keys: text + occurrence index among same texts
+  const computeHeadingKeys = (lines: string[]) => {
+    const keys: string[] = [];
+    const positions: Array<{ lineNumber: number; key: string; text: string }> = [];
+    const counts: Record<string, number> = {};
+    lines.forEach((line, idx) => {
+      if (headingLineRegex.test(line)) {
+        const text = line.trim();
+        const base = text;
+        const n = counts[base] || 0;
+        counts[base] = n + 1;
+        const key = `${base}@@${n}`;
+        keys.push(key);
+        positions.push({ lineNumber: idx + 1, key, text: base });
+      }
+    });
+    return { keys, positions };
+  };
+
+  const formatMMSS = (ms: number) => {
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const clearContentWidgets = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    for (const w of contentWidgetsRef.current) {
+      try { editor.removeContentWidget(w); } catch {}
+    }
+    contentWidgetsRef.current = [];
+  };
+
+  const updateHeadingWidgets = () => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    clearContentWidgets();
+
+    const lines = model.getLinesContent();
+    const { positions } = computeHeadingKeys(lines);
+
+    positions.forEach(({ lineNumber, key }) => {
+      const hasTs = headingTsRef.current[key] != null;
+      const ts = headingTsRef.current[key];
+      // If recording and no timestamp yet (e.g., pre-existing heading), show placeholder
+      const label = hasTs ? `⏱ ${formatMMSS(ts!)}` : (isRecording ? '⏱ --:--' : null);
+      if (!label) return;
+
+      const id = `s2a-ts-${key}`;
+      const node = document.createElement('div');
+      node.className = `s2a-ts-chip ${hasTs ? '' : 's2a-ts-placeholder'}`.trim();
+      node.textContent = label;
+
+      const widget = {
+        getId: () => id,
+        getDomNode: () => node,
+        getPosition: () => ({ position: { lineNumber, column: 1 }, preference: [monaco.contentWidgetPositionPreference.EXACT] }),
+      };
+      editor.addContentWidget(widget);
+      contentWidgetsRef.current.push(widget);
+    });
+  };
+
+  const updateHeadingTimestamps = (text: string) => {
+    const lines = text.split('\n');
+    const { keys } = computeHeadingKeys(lines);
+
+    // If recording, assign timestamps to new headings only
+    if (isRecording) {
+      const prevKeys = new Set(prevHeadingKeysRef.current);
+      keys.forEach((k) => {
+        if (!(k in headingTsRef.current) && !prevKeys.has(k)) {
+          headingTsRef.current[k] = nowRelativeMs();
+        }
+      });
+    }
+
+    prevHeadingKeysRef.current = keys;
+
+    // Refresh widgets & marker hiding
+    updateHeadingWidgets();
+  };
+  // --- End heading timestamp ---
+
   useEffect(() => {
     loadSources();
   }, []);
@@ -104,6 +205,16 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
       recordingStartTimeRef.current = Date.now();
       setIsRecording(true);
       clearNotes();
+
+      // Initialize heading timestamp baseline so existing headings don't get timestamps
+      headingTsRef.current = {};
+      try {
+        const lines = (notes || '').split('\n');
+        const { keys } = computeHeadingKeys(lines);
+        prevHeadingKeysRef.current = keys;
+      } catch {}
+      // Refresh overlays
+      try { updateHeadingWidgets(); } catch {}
     } catch (error) {
       console.error('Failed to start recording:', error);
       alert('Failed to start recording');
@@ -120,7 +231,7 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
       }
       
       if (sessionIdRef.current) {
-        // Save markdown notes to file
+        // Save markdown notes to file (raw, no injected markers)
         if (notes.trim()) {
           try {
             await window.electronAPI.file.saveMarkdown(sessionIdRef.current, notes);
@@ -130,59 +241,67 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
           }
         }
         
-        // Parse notes with timestamps from markdown
-        // New logic: split notes into sections using Markdown H1 headings (lines starting with "# ")
+        // Parse notes into sections using Markdown headings (H1~H6)
         const rawLines = notes.split('\n');
-        const sections: string[] = [];
-        let currentSection: string[] = [];
-        for (const line of rawLines) {
-          if (line.startsWith('# ')) {
-            if (currentSection.length) {
-              sections.push(currentSection.join('\n').trim());
+        const sections: { headingKey: string | null; text: string }[] = [];
+        let current: string[] = [];
+        let currentKey: string | null = null;
+
+        // For keying, recompute keys with occurrence indices
+        const { positions } = computeHeadingKeys(rawLines);
+        const lineToKey = new Map<number, string>();
+        positions.forEach(p => lineToKey.set(p.lineNumber, p.key));
+
+        rawLines.forEach((line, idx) => {
+          if (headingLineRegex.test(line)) {
+            if (current.length) {
+              sections.push({ headingKey: currentKey, text: current.join('\n').trim() });
             }
-            currentSection = [line];
+            current = [line];
+            currentKey = lineToKey.get(idx + 1) || null;
           } else {
-            // Only accumulate lines after the first H1 appears
-            if (currentSection.length) {
-              currentSection.push(line);
-            }
+            if (current.length) current.push(line);
           }
-        }
-        if (currentSection.length) {
-          sections.push(currentSection.join('\n').trim());
+        });
+        if (current.length) {
+          sections.push({ headingKey: currentKey, text: current.join('\n').trim() });
         }
 
-        // Fallback: if no H1 headings were found, revert to previous line-based splitting
         const noteEntries = sections.length > 0
           ? sections
-          : rawLines.filter(line => line.trim());
+          : rawLines.filter(line => line.trim()).map(t => ({ headingKey: null, text: t }));
+
+        const durationMs = stopResult?.duration ?? nowRelativeMs();
 
         noteEntries.forEach((entry, index) => {
-          // Try to extract timestamp from formats like:
-          //   [00:30] Some content
-          //   # [00:30] Heading title
-          const timestampMatch = entry.match(/^#?\s*\[(\d{2}):(\d{2})\]\s*([\s\S]*)/);
-          let timestamp: number;
-          let content: string = entry;
-
-            if (timestampMatch) {
-            const minutes = parseInt(timestampMatch[1]);
-            const seconds = parseInt(timestampMatch[2]);
-            timestamp = (minutes * 60 + seconds) * 1000;
-            // Remove just the leading [MM:SS] (and any extra spaces) while preserving a leading '# ' if present
-            content = entry
-              .replace(/^(#?)(\s*)\[(\d{2}):(\d{2})\]\s*/, (_m, hash) => hash ? '# ' : '')
-              .trim();
-          } else {
-            // Distribute timestamps evenly across total recording time as before
-            const recordingDuration = Date.now() - recordingStartTimeRef.current;
-            timestamp = Math.floor((index / Math.max(noteEntries.length - 1, 1)) * recordingDuration);
+          // Prefer in-memory heading timestamp if available
+          let timestamp: number | null = null;
+          if (entry.headingKey && headingTsRef.current[entry.headingKey] != null) {
+            timestamp = headingTsRef.current[entry.headingKey];
           }
 
-          addNote({
-            content,
-            timestamp,
-          });
+          // Next, support [MM:SS] at the start (with or without heading hashes)
+          if (timestamp === null) {
+            const tsMatch = entry.text.match(/^#{0,6}\s*\[(\d{2}):(\d{2})\]\s*([\s\S]*)/);
+            if (tsMatch) {
+              const minutes = parseInt(tsMatch[1], 10);
+              const seconds = parseInt(tsMatch[2], 10);
+              timestamp = (minutes * 60 + seconds) * 1000;
+            }
+          }
+
+          // Finally, fallback to average distribution across total duration
+          if (timestamp === null) {
+            const denom = Math.max(noteEntries.length - 1, 1);
+            timestamp = Math.floor((index / denom) * durationMs);
+          }
+
+          // Clean content: remove marker/comment and leading [MM:SS], keep heading hashes
+          let content = entry.text
+            .replace(/^(#{0,6})(\s*)\[(\d{2}):(\d{2})\]\s*/, (_m, hashes) => (hashes ? `${hashes} ` : ''))
+            .trim();
+
+          addNote({ content, timestamp });
         });
         
         onRecordingComplete(sessionIdRef.current);
@@ -214,8 +333,38 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
       .padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleEditorMount = (editor: any, monaco: any) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+    updateHeadingWidgets();
+    // Initialize prev keys so only new headings get timestamps while recording
+    try { updateHeadingTimestamps(notes || ''); } catch {}
+    editor.onDidChangeModelContent(() => {
+      updateHeadingTimestamps(editor.getValue());
+    });
+  };
+
   return (
     <div className="flex flex-col h-full">
+      {/* Inject styles to hide marker comments inside Monaco */}
+      <style>{`
+        .s2a-ts-chip { 
+          position: absolute; 
+          transform: translateY(-1.2em); 
+          background: rgba(59,130,246,0.18); 
+          color: #bfdbfe; 
+          border: 1px solid rgba(59,130,246,0.4);
+          font-size: 11px; 
+          line-height: 1; 
+          border-radius: 6px; 
+          padding: 3px 6px; 
+          pointer-events: none; 
+          user-select: none; 
+          z-index: 50;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+        }
+        .s2a-ts-placeholder { opacity: 0.6; }
+      `}</style>
       {conversionMessage && (
         <div className="mb-2 px-4 py-2 rounded bg-gray-700 text-sm text-gray-200 shadow inline-flex items-center space-x-2">
           <span>🎵</span>
@@ -309,7 +458,7 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
       <div className="flex-1 bg-gray-800 rounded-lg p-4 flex flex-col min-h-[500px]">
         <div className="flex justify-between items-start mb-2 flex-shrink-0">
           <h2 className="text-lg font-semibold">Markdown Notes Editor</h2>
-          <span className="text-xs text-gray-400">Tip: Use [MM:SS] format for timestamps, e.g., [01:30] Note here</span>
+          <span className="text-xs text-gray-400">Tip: Use headings (# ..) while recording; timestamps are auto-stamped</span>
         </div>
         <div className="flex-1 min-h-100 border border-gray-700 rounded overflow-hidden">
           <Editor
@@ -318,7 +467,12 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
             defaultLanguage="markdown"
             theme="vs-dark"
             value={notes}
-            onChange={(value) => setNotes(value || '')}
+            onChange={(value) => {
+              const v = value || '';
+              setNotes(v);
+              updateHeadingTimestamps(v);
+            }}
+            onMount={handleEditorMount}
             options={{
               minimap: { enabled: false },
               fontSize: 14,
