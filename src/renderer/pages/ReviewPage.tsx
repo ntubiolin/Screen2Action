@@ -82,9 +82,11 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
   const [audioPath, setAudioPath] = useState<string>('');
   const [audioError, setAudioError] = useState<string>('');
   const [mcpServers, setMcpServers] = useState<Array<any>>([]);
-  const [selectedMcpServer, setSelectedMcpServer] = useState<string>('');
-  const [mcpTools, setMcpTools] = useState<Array<any>>([]);
-  const [showMcpDropdown, setShowMcpDropdown] = useState(false);
+  const [selectedMcpServers, setSelectedMcpServers] = useState<Set<string>>(new Set());
+  const [mcpTools, setMcpTools] = useState<Map<string, any[]>>(new Map());
+  const [selectedMcpTools, setSelectedMcpTools] = useState<Map<string, Set<string>>>(new Map());
+  const [mcpLoading, setMcpLoading] = useState<Map<string, boolean>>(new Map());
+  const [mcpError, setMcpError] = useState<string>('');
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
   const [pausedIndex, setPausedIndex] = useState<number | null>(null);
   const [audioProgress, setAudioProgress] = useState<{ [key: number]: number }>({});
@@ -102,47 +104,79 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
   // Load MCP servers on mount
   React.useEffect(() => {
     const loadMcpServers = async () => {
+      setMcpError('');
       try {
+        console.log('Loading MCP servers...');
         const result = await window.electronAPI.ai.sendCommand({
           action: 'get_mcp_servers',
           payload: {},
         });
-        if (result.servers) {
+        console.log('MCP servers response:', result);
+        if (result.servers && result.servers.length > 0) {
+          console.log('Setting MCP servers:', result.servers);
           setMcpServers(result.servers);
+        } else {
+          console.warn('No servers in response:', result);
+          setMcpError('No MCP servers configured.');
         }
       } catch (error) {
         console.error('Failed to load MCP servers:', error);
+        setMcpError('Failed to load MCP servers.');
       }
     };
     loadMcpServers();
   }, []);
 
-  // Load MCP tools when server is selected
+  // Load MCP tools when servers are selected
   React.useEffect(() => {
-    const loadMcpTools = async () => {
-      if (!selectedMcpServer) return;
+    const loadToolsForServers = async () => {
+      if (selectedMcpServers.size === 0) {
+        setMcpTools(new Map());
+        return;
+      }
       
-      try {
-        // First activate the server
-        await window.electronAPI.ai.sendCommand({
-          action: 'activate_mcp_server',
-          payload: { server_name: selectedMcpServer },
-        });
+      setMcpError('');
+      const newTools = new Map<string, any[]>();
+      const newLoadingStates = new Map<string, boolean>();
+      
+      // Load tools for each selected server
+      for (const serverName of selectedMcpServers) {
+        newLoadingStates.set(serverName, true);
+        setMcpLoading(new Map(newLoadingStates));
         
-        // Then list available tools
-        const result = await window.electronAPI.ai.sendCommand({
-          action: 'list_mcp_tools',
-          payload: {},
-        });
-        if (result.tools) {
-          setMcpTools(result.tools);
+        try {
+          // First activate the server
+          await window.electronAPI.ai.sendCommand({
+            action: 'activate_mcp_server',
+            payload: { server_name: serverName },
+          });
+          
+          // Then list available tools
+          const result = await window.electronAPI.ai.sendCommand({
+            action: 'list_mcp_tools',
+            payload: {},
+          });
+          
+          if (result.tools && result.tools.length > 0) {
+            newTools.set(serverName, result.tools);
+          }
+        } catch (error) {
+          console.error(`Failed to load tools for ${serverName}:`, error);
+        } finally {
+          newLoadingStates.set(serverName, false);
+          setMcpLoading(new Map(newLoadingStates));
         }
-      } catch (error) {
-        console.error('Failed to load MCP tools:', error);
+      }
+      
+      setMcpTools(newTools);
+      
+      if (newTools.size === 0) {
+        setMcpError('No tools available from selected servers.');
       }
     };
-    loadMcpTools();
-  }, [selectedMcpServer]);
+    
+    loadToolsForServers();
+  }, [selectedMcpServers]);
 
   // Get output folder path and audio path on mount
   React.useEffect(() => {
@@ -240,8 +274,19 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
 
     setIsProcessing(true);
     try {
-      // Check if MCP server is selected and use intelligent task
-      if (selectedMcpServer) {
+      // Check if MCP servers are selected and use intelligent task
+      const totalSelectedTools = Array.from(selectedMcpTools.values())
+        .reduce((sum, tools) => sum + tools.size, 0);
+      
+      if (selectedMcpServers.size > 0 && totalSelectedTools > 0) {
+        // Prepare tools list with server information
+        const toolsList: Array<{server: string, tool: string}> = [];
+        selectedMcpTools.forEach((tools, serverName) => {
+          tools.forEach(toolName => {
+            toolsList.push({ server: serverName, tool: toolName });
+          });
+        });
+        
         const result = await window.electronAPI.ai.sendCommand({
           action: 'run_intelligent_task',
           payload: {
@@ -250,13 +295,22 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
               sessionId,
               noteContent: notes[selectedNote]?.content || '',
               timestamp: notes[selectedNote]?.timestamp || 0,
-              mcpServer: selectedMcpServer,
+              mcpServers: Array.from(selectedMcpServers),
+              selectedTools: toolsList,
             },
           },
         });
         
         if (result.result) {
-          setAiResponse(typeof result.result === 'string' ? result.result : JSON.stringify(result.result, null, 2));
+          // Handle MCP agent response
+          if (typeof result.result === 'object' && result.result.result) {
+            // Extract the actual result message from the MCP agent response
+            setAiResponse(result.result.result);
+          } else if (typeof result.result === 'string') {
+            setAiResponse(result.result);
+          } else {
+            setAiResponse(JSON.stringify(result.result, null, 2));
+          }
         } else {
           setAiResponse(result.response || 'Processing complete');
         }
@@ -282,33 +336,6 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
     }
   };
 
-  const handleMcpToolExecute = async (toolName: string) => {
-    setIsProcessing(true);
-    try {
-      const result = await window.electronAPI.ai.sendCommand({
-        action: 'execute_mcp_tool',
-        payload: {
-          tool_name: toolName,
-          params: {
-            context: {
-              sessionId,
-              noteContent: notes[selectedNote]?.content || '',
-              timestamp: notes[selectedNote]?.timestamp || 0,
-            },
-          },
-        },
-      });
-      
-      if (result.result) {
-        setAiResponse(`Tool ${toolName} executed:\n${JSON.stringify(result.result, null, 2)}`);
-      }
-    } catch (error) {
-      console.error('MCP tool execution failed:', error);
-      setAiResponse('Tool execution failed');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   const formatTimestamp = (ms: number): string => {
     const seconds = Math.floor(ms / 1000);
@@ -379,6 +406,32 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
     URL.revokeObjectURL(url);
     
     setAiResponse('SRT file has been downloaded successfully.');
+  };
+
+  const convertToMarkdown = () => {
+    if (notes.length === 0) {
+      setAiResponse('No notes available to convert to Markdown.');
+      return;
+    }
+
+    let markdownContent = '';
+    notes.forEach((note) => {
+      markdownContent += `${note.content}\n\n`;
+    });
+
+    // Save the Markdown file
+    const blob = new Blob([markdownContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const datePrefix = new Date().toISOString().replace(/[:.]/g, '_').slice(0, 19);
+    a.href = url;
+    a.download = `${sessionId}_${datePrefix}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setAiResponse('Markdown file has been downloaded successfully.');
   };
 
   const playAudioSegment = async (index: number) => {
@@ -728,92 +781,165 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
           <h2 className="text-lg font-semibold px-4 pt-4 pb-2">AI Assistant</h2>
           
           <div className="flex-1 overflow-y-auto px-4 pb-4">
-            {/* MCP Server Selection */}
-            <div className="mb-4">
-            <label className="text-sm text-gray-400 mb-2 block">MCP Server:</label>
-            <div className="relative">
-              <button
-                onClick={() => setShowMcpDropdown(!showMcpDropdown)}
-                className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-left flex items-center justify-between"
-              >
-                <span className="flex items-center">
-                  {selectedMcpServer ? (
-                    <>
-                      <span className="mr-2">
-                        {mcpServers.find(s => s.name === selectedMcpServer)?.icon || '🔧'}
-                      </span>
-                      {selectedMcpServer}
-                    </>
-                  ) : (
-                    'Select MCP Server (Optional)'
-                  )}
-                </span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                    d={showMcpDropdown ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} />
-                </svg>
-              </button>
+            {/* MCP Configuration */}
+            <div className="mb-4 border border-blue-600 rounded-lg p-3 bg-gray-900">
+              <h3 className="text-sm font-semibold mb-3 text-blue-400">🤖 MCP Tools</h3>
               
-              {showMcpDropdown && (
-                <div className="absolute z-10 w-full mt-1 bg-gray-700 rounded shadow-lg max-h-60 overflow-y-auto">
-                  <button
-                    onClick={() => {
-                      setSelectedMcpServer('');
-                      setMcpTools([]);
-                      setShowMcpDropdown(false);
-                    }}
-                    className="w-full px-3 py-2 text-left hover:bg-gray-600 text-gray-400"
-                  >
-                    None (Use Default AI)
-                  </button>
-                  {mcpServers.map((server) => (
-                    <button
-                      key={server.name}
-                      onClick={() => {
-                        setSelectedMcpServer(server.name);
-                        setShowMcpDropdown(false);
-                      }}
-                      disabled={!server.enabled}
-                      className={`w-full px-3 py-2 text-left flex items-center ${
-                        server.enabled ? 'hover:bg-gray-600' : 'opacity-50 cursor-not-allowed'
-                      }`}
-                    >
-                      <span className="mr-2">{server.icon}</span>
-                      <div className="flex-1">
-                        <div className="font-medium">{server.name}</div>
-                        <div className="text-xs text-gray-400">{server.description}</div>
-                      </div>
-                      {server.active && (
-                        <span className="text-xs bg-green-600 px-2 py-1 rounded">Active</span>
-                      )}
-                    </button>
-                  ))}
+              {/* Server Selection with Checkboxes */}
+              <div className="mb-3">
+                <label className="text-xs text-gray-400 mb-1 block">Select Servers:</label>
+                <div className="max-h-32 overflow-y-auto bg-gray-800 rounded p-2 border border-gray-700">
+                  {mcpServers.length > 0 ? (
+                    <div className="space-y-1">
+                      {mcpServers.map((server) => (
+                        <label key={server.name} className="flex items-center hover:bg-gray-700 p-1 rounded cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedMcpServers.has(server.name)}
+                            onChange={(e) => {
+                              const newSelected = new Set(selectedMcpServers);
+                              if (e.target.checked) {
+                                newSelected.add(server.name);
+                              } else {
+                                newSelected.delete(server.name);
+                                // Also remove tools from this server
+                                const newSelectedTools = new Map(selectedMcpTools);
+                                newSelectedTools.delete(server.name);
+                                setSelectedMcpTools(newSelectedTools);
+                              }
+                              setSelectedMcpServers(newSelected);
+                            }}
+                            disabled={!server.enabled}
+                            className="mr-2"
+                          />
+                          <span className="mr-2">{server.icon || '🔧'}</span>
+                          <span className={`text-xs ${!server.enabled ? 'opacity-50' : ''}`}>
+                            {server.name}
+                            {server.description && (
+                              <span className="text-gray-500 ml-1">({server.description})</span>
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500">No MCP servers configured</div>
+                  )}
+                </div>
+                {selectedMcpServers.size > 0 && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    {selectedMcpServers.size} server{selectedMcpServers.size !== 1 ? 's' : ''} selected
+                  </div>
+                )}
+              </div>
+              
+              {/* Error State */}
+              {mcpError && (
+                <div className="text-xs text-yellow-400 mb-2">⚠️ {mcpError}</div>
+              )}
+              
+              {/* Tools Checkbox List - Grouped by Server */}
+              {selectedMcpServers.size > 0 && (
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Available Tools:</label>
+                  <div className="max-h-64 overflow-y-auto bg-gray-800 rounded p-2 border border-gray-700">
+                    {Array.from(selectedMcpServers).map((serverName) => {
+                      const serverTools = mcpTools.get(serverName) || [];
+                      const isLoading = mcpLoading.get(serverName) || false;
+                      const serverSelectedTools = selectedMcpTools.get(serverName) || new Set();
+                      
+                      return (
+                        <div key={serverName} className="mb-3 last:mb-0">
+                          <div className="text-xs font-semibold text-blue-300 mb-1 flex items-center">
+                            {mcpServers.find(s => s.name === serverName)?.icon || '🔧'} {serverName}
+                            {isLoading && <span className="ml-2 text-gray-400">Loading...</span>}
+                          </div>
+                          
+                          {!isLoading && serverTools.length > 0 ? (
+                            <div className="pl-4 space-y-1">
+                              {serverTools.map((tool) => (
+                                <label key={`${serverName}-${tool.name}`} className="flex items-start hover:bg-gray-700 p-1 rounded cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={serverSelectedTools.has(tool.name)}
+                                    onChange={(e) => {
+                                      const newSelectedTools = new Map(selectedMcpTools);
+                                      const serverTools = newSelectedTools.get(serverName) || new Set();
+                                      
+                                      if (e.target.checked) {
+                                        serverTools.add(tool.name);
+                                      } else {
+                                        serverTools.delete(tool.name);
+                                      }
+                                      
+                                      if (serverTools.size > 0) {
+                                        newSelectedTools.set(serverName, serverTools);
+                                      } else {
+                                        newSelectedTools.delete(serverName);
+                                      }
+                                      
+                                      setSelectedMcpTools(newSelectedTools);
+                                    }}
+                                    className="mr-2 mt-0.5"
+                                  />
+                                  <div className="flex-1">
+                                    <div className="text-xs font-medium text-white">{tool.name}</div>
+                                    {tool.description && (
+                                      <div className="text-xs text-gray-500">{tool.description}</div>
+                                    )}
+                                  </div>
+                                </label>
+                              ))}
+                            </div>
+                          ) : !isLoading ? (
+                            <div className="pl-4 text-xs text-gray-500">No tools available</div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  {/* Summary and bulk actions */}
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="text-xs">
+                      {(() => {
+                        const totalTools = Array.from(selectedMcpTools.values())
+                          .reduce((sum, tools) => sum + tools.size, 0);
+                        return totalTools > 0 ? (
+                          <span className="text-green-400">
+                            ✓ {totalTools} tool{totalTools !== 1 ? 's' : ''} selected
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">No tools selected</span>
+                        );
+                      })()}
+                    </div>
+                    <div className="space-x-2">
+                      <button
+                        onClick={() => {
+                          const newSelectedTools = new Map<string, Set<string>>();
+                          selectedMcpServers.forEach(serverName => {
+                            const serverTools = mcpTools.get(serverName) || [];
+                            if (serverTools.length > 0) {
+                              newSelectedTools.set(serverName, new Set(serverTools.map(t => t.name)));
+                            }
+                          });
+                          setSelectedMcpTools(newSelectedTools);
+                        }}
+                        className="text-xs text-blue-400 hover:text-blue-300"
+                      >
+                        All
+                      </button>
+                      <button
+                        onClick={() => setSelectedMcpTools(new Map())}
+                        className="text-xs text-blue-400 hover:text-blue-300"
+                      >
+                        None
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
-            </div>
-            
-            {/* MCP Tools Display */}
-            {selectedMcpServer && mcpTools.length > 0 && (
-              <div className="mt-2">
-                <p className="text-xs text-gray-500 mb-1">Available Tools:</p>
-                <div className="flex flex-wrap gap-1">
-                  {mcpTools.slice(0, 5).map((tool) => (
-                    <button
-                      key={tool.name}
-                      onClick={() => handleMcpToolExecute(tool.name)}
-                      disabled={isProcessing}
-                      className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded"
-                      title={tool.description || tool.name}
-                    >
-                      {tool.name}
-                    </button>
-                  ))}
-                  {mcpTools.length > 5 && (
-                    <span className="text-xs text-gray-500">+{mcpTools.length - 5} more</span>
-                  )}
-                </div>
-              </div>
-            )}
             </div>
             
             <div className="mb-4">
@@ -845,9 +971,15 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({ sessionId }) => {
               </button>
               <button
                 onClick={convertToSRT}
-                className="px-3 py-2 bg-green-700 hover:bg-green-600 rounded text-sm col-span-2"
+                className="px-3 py-2 bg-green-700 hover:bg-green-600 rounded text-sm col-span-1"
               >
                 Save as SRT
+              </button>
+              <button
+                onClick={convertToMarkdown}
+                className="px-3 py-2 bg-blue-700 hover:bg-blue-600 rounded text-sm col-span-1"
+              >
+                Export to Markdown
               </button>
             </div>
             </div>
