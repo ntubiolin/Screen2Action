@@ -49,9 +49,13 @@ class MCPClient:
         self.mcp_agent = None
         self.active_server: Optional[str] = None
         self.server_processes: Dict[str, subprocess.Popen] = {}
+        logger.info(f"Initializing MCPClient - MCP_USE_AVAILABLE: {MCP_USE_AVAILABLE}")
+        if not MCP_USE_AVAILABLE:
+            logger.error(f"MCP_USE import error: {MCP_USE_IMPORT_ERROR}")
         self._load_config()
         self._initialize_mcp_use()
         self._load_default_servers()
+        logger.info(f"MCPClient initialized - mcp_agent available: {self.mcp_agent is not None}")
     
     async def __aenter__(self):
         """Async context manager entry."""
@@ -93,7 +97,7 @@ class MCPClient:
             MCPServerConfig(
                 name="filesystem",
                 command="npx",
-                args=["-y", "@modelcontextprotocol/server-filesystem", "stdio"],
+                args=["-y", "@modelcontextprotocol/server-filesystem"],
                 description="File system operations (read, write, list)",
                 icon="📁",
                 enabled=True
@@ -150,6 +154,7 @@ class MCPClient:
     
     def _initialize_mcp_use(self):
         """Initialize mcp-use client and agent if available."""
+        logger.info(f"Starting _initialize_mcp_use - MCP_USE_AVAILABLE: {MCP_USE_AVAILABLE}")
         if not MCP_USE_AVAILABLE:
             logger.info(f"mcp-use not available ({MCP_USE_IMPORT_ERROR}), using traditional MCP processing only")
             return
@@ -186,6 +191,7 @@ class MCPClient:
                 
                 # Try to initialize mcp-use client with config
                 if mcp_config_path.exists():
+                    logger.info(f"Loading MCP config from {mcp_config_path}")
                     self.mcp_use_client = MCPUseClient.from_config_file(str(mcp_config_path))
                     
                     # Use FilteredMCPAgent if available, otherwise fallback to regular MCPAgent
@@ -206,11 +212,29 @@ class MCPClient:
                 else:
                     logger.info("⚠️  No mcp-use config file found, creating default config")
                     self._create_default_config()
+                    # Try again after creating config
+                    if Path('config/mcp_config.json').exists():
+                        self.mcp_use_client = MCPUseClient.from_config_file('config/mcp_config.json')
+                        if FILTERED_AGENT_AVAILABLE:
+                            self.mcp_agent = FilteredMCPAgent(
+                                llm=llm, 
+                                client=self.mcp_use_client, 
+                                max_steps=30
+                            )
+                        else:
+                            self.mcp_agent = MCPAgent(
+                                llm=llm, 
+                                client=self.mcp_use_client, 
+                                max_steps=30
+                            )
+                        logger.info("✅ Successfully initialized mcp-use after creating config")
             else:
                 logger.info("⚠️  Neither OpenAI nor Ollama configured, mcp-use features limited")
                 
         except Exception as e:
             logger.error(f"❌ Failed to initialize mcp-use: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _create_default_config(self):
         """Create a default MCP configuration file."""
@@ -354,22 +378,105 @@ class MCPClient:
         try:
             # Start the server process
             cmd = [server.command] + server.args
+            
+            # Add path argument for filesystem server if not already present
+            if server_name == 'filesystem':
+                # Use the recordings directory as the base path
+                recordings_path = os.path.abspath('./recordings')
+                # Ensure the directory exists
+                os.makedirs(recordings_path, exist_ok=True)
+                # Only append path if not already in args
+                if recordings_path not in cmd and './recordings' not in cmd:
+                    cmd.append(recordings_path)
+                logger.info(f"Starting filesystem server with path: {recordings_path}")
+            
             env = dict(os.environ)
             if server.env:
                 env.update(server.env)
             
+            logger.info(f"Starting MCP server with command: {' '.join(cmd)}")
+            
+            # For filesystem server, use JSON mode (not stdio)
+            # Note: The filesystem server expects stdio communication even though we don't pass it as arg
             process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env=env
+                env=env,
+                text=True,
+                bufsize=1,  # Line buffered for JSON-RPC
+                universal_newlines=True
             )
             
-            self.server_processes[server_name] = process
-            self.active_server = server_name
-            logger.info(f"Activated MCP server: {server_name}")
-            return True
+            # Check if process started successfully
+            try:
+                # Give it a moment to start
+                import time
+                time.sleep(0.5)
+                
+                # Check if process is still running
+                if process.poll() is not None:
+                    # Process terminated
+                    stderr_output = process.stderr.read()
+                    logger.error(f"MCP server {server_name} failed to start: {stderr_output}")
+                    return False
+                
+                # Initialize the MCP server with proper protocol
+                init_request = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "0.1.0",
+                        "clientInfo": {
+                            "name": "Screen2Action",
+                            "version": "1.0.0"
+                        },
+                        "capabilities": {}
+                    }
+                }
+                
+                logger.info(f"Sending initialization request to {server_name}")
+                request_str = json.dumps(init_request)
+                logger.debug(f"Sending: {request_str}")
+                process.stdin.write(request_str + '\n')
+                process.stdin.flush()
+                
+                # Read initialization response with timeout
+                import select
+                ready = select.select([process.stdout], [], [], 5.0)  # 5 second timeout
+                if ready[0]:
+                    init_response = process.stdout.readline()
+                    logger.debug(f"Received response: {init_response}")
+                    if init_response:
+                        try:
+                            response = json.loads(init_response)
+                            if "result" in response:
+                                logger.info(f"MCP server {server_name} initialized successfully: {response.get('result')}")
+                            else:
+                                logger.error(f"Failed to initialize MCP server: {response}")
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Could not parse init response: {e}. Response: {init_response}")
+                else:
+                    logger.warning(f"No initialization response from {server_name} server (timeout)")
+                
+                # Verify process is still running
+                if process.poll() is not None:
+                    stderr_output = process.stderr.read()
+                    logger.error(f"MCP server terminated after init: {stderr_output}")
+                    return False
+                
+                self.server_processes[server_name] = process
+                self.active_server = server_name
+                logger.info(f"Activated MCP server: {server_name}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error during server initialization: {e}")
+                if process.poll() is None:
+                    process.terminate()
+                return False
             
         except Exception as e:
             logger.error(f"Failed to activate server {server_name}: {e}")
@@ -409,7 +516,7 @@ class MCPClient:
             # MCP protocol: Call tool
             request = {
                 "jsonrpc": "2.0",
-                "id": 1,
+                "id": 3,
                 "method": "tools/call",
                 "params": {
                     "name": tool_name,
@@ -417,14 +524,16 @@ class MCPClient:
                 }
             }
             
-            # Send request
-            request_json = json.dumps(request) + '\n'
-            process.stdin.write(request_json.encode())
+            # Send request (process opened in text mode)
+            process.stdin.write(json.dumps(request) + '\n')
             process.stdin.flush()
             
             # Read response
             response_line = process.stdout.readline()
-            response = json.loads(response_line.decode().strip())
+            if not response_line:
+                return {"error": "No response from MCP server"}
+                
+            response = json.loads(response_line.strip())
             
             if "error" in response:
                 logger.error(f"Tool {tool_name} returned error: {response['error']}")
@@ -446,27 +555,57 @@ class MCPClient:
         
         process = self.server_processes[self.active_server]
         
+        # Check if process is still alive
+        if process.poll() is not None:
+            logger.error(f"MCP server {self.active_server} has terminated")
+            # Clean up dead process
+            del self.server_processes[self.active_server]
+            self.active_server = None
+            return []
+        
         try:
             # Request tools list
             request = {
                 "jsonrpc": "2.0",
-                "id": 1,
+                "id": 2,
                 "method": "tools/list",
                 "params": {}
             }
             
-            process.stdin.write((json.dumps(request) + '\n').encode())
+            logger.debug(f"Sending tools/list request to {self.active_server}")
+            process.stdin.write(json.dumps(request) + '\n')
             process.stdin.flush()
             
-            # Read response
-            response_line = process.stdout.readline()
-            response = json.loads(response_line.decode().strip())
+            # Read response with timeout
+            import select
+            ready = select.select([process.stdout], [], [], 2.0)  # 2 second timeout
+            if ready[0]:
+                response_line = process.stdout.readline()
+                if not response_line:
+                    logger.error("No response from MCP server")
+                    return []
+                    
+                response = json.loads(response_line.strip())
+                logger.debug(f"Tools list response: {response}")
+                
+                if "result" in response and "tools" in response["result"]:
+                    tools = response["result"]["tools"]
+                    logger.info(f"Found {len(tools)} tools from {self.active_server}")
+                    return tools
+                elif "error" in response:
+                    logger.error(f"Error from MCP server: {response['error']}")
+                    return []
+            else:
+                logger.warning(f"Timeout waiting for tools list from {self.active_server}")
+                return []
             
-            if "result" in response and "tools" in response["result"]:
-                return response["result"]["tools"]
-            
+        except BrokenPipeError:
+            logger.error(f"Broken pipe - MCP server {self.active_server} has terminated")
+            # Clean up dead process
+            if self.active_server in self.server_processes:
+                del self.server_processes[self.active_server]
+            self.active_server = None
             return []
-            
         except Exception as e:
             logger.error(f"Failed to list tools: {e}")
             return []

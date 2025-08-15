@@ -203,13 +203,20 @@ export class WebSocketServer extends EventEmitter {
       this.messageQueue.set(id, resolve);
       client.send(JSON.stringify(fullMessage));
       
-      // Timeout after 30 seconds
+      // Longer timeout for MCP operations
+      const timeoutDuration = 
+        message.action?.includes('mcp') || 
+        message.action?.includes('intelligent') ||
+        message.action === 'run_intelligent_task'
+          ? 120000  // 2 minutes for MCP operations
+          : 30000;  // 30 seconds for other operations
+      
       setTimeout(() => {
         if (this.messageQueue.has(id)) {
           this.messageQueue.delete(id);
           reject(new Error('Request timeout'));
         }
-      }, 30000);
+      }, timeoutDuration);
     });
   }
   

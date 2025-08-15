@@ -187,12 +187,22 @@ ipcMain.handle('capture-screenshot', async (_, options: any) => {
 });
 
 ipcMain.handle('send-to-ai', async (_, data: any) => {
+  console.log('Received AI command:', data);
   if (wsServer) {
-    return await wsServer.sendMessage({
+    // If data has an action field, use it directly, otherwise default to process_command
+    const message = data.action ? {
       type: 'request',
+      action: data.action,
+      payload: data.payload || {},
+    } : {
+      type: 'request', 
       action: 'process_command',
       payload: data,
-    });
+    };
+    console.log('Sending to backend:', message);
+    const result = await wsServer.sendMessage(message);
+    console.log('Backend response:', result);
+    return result;
   }
   throw new Error('WebSocket server not initialized');
 });

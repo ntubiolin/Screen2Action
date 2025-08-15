@@ -82,6 +82,31 @@ async def startup_event():
             elif data.get('action') == 'stop_recording':
                 result = await recording_service.stop_recording()
                 await electron_client.send_response(data['id'], {"success": True, "result": result})
+            elif data.get('action') == 'get_mcp_servers':
+                servers = await mcp_service.get_mcp_servers()
+                await electron_client.send_response(data['id'], {"success": True, "servers": servers})
+            elif data.get('action') == 'activate_mcp_server':
+                server_name = data.get('payload', {}).get('server_name')
+                success = await mcp_service.activate_mcp_server(server_name)
+                await electron_client.send_response(data['id'], {"success": success})
+            elif data.get('action') == 'deactivate_mcp_server':
+                await mcp_service.deactivate_mcp_server()
+                await electron_client.send_response(data['id'], {"success": True})
+            elif data.get('action') == 'list_mcp_tools':
+                tools = await mcp_service.list_mcp_tools()
+                await electron_client.send_response(data['id'], {"success": True, "tools": tools})
+            elif data.get('action') == 'execute_mcp_tool':
+                result = await mcp_service.execute_mcp_tool(
+                    data.get('payload', {}).get('tool_name'),
+                    data.get('payload', {}).get('params', {})
+                )
+                await electron_client.send_response(data['id'], {"success": True, "result": result})
+            elif data.get('action') == 'run_intelligent_task':
+                result = await mcp_service.run_intelligent_task(
+                    data.get('payload', {}).get('task'),
+                    data.get('payload', {}).get('context', {})
+                )
+                await electron_client.send_response(data['id'], {"success": True, "result": result})
             elif data.get('action') == 'process_command':
                 # Handle AI commands
                 message = Message(**data)
