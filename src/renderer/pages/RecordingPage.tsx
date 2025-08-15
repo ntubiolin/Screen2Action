@@ -374,6 +374,13 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
       <div className="bg-gray-800 p-4 rounded-lg mb-4 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
+            <button
+              onClick={() => window.electronAPI.window.openFloatingWindow()}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded flex items-center space-x-2"
+            >
+              <span>🪟</span>
+              <span>Floating Mode</span>
+            </button>
             <select
               value={selectedScreen}
               onChange={(e) => setSelectedScreen(e.target.value)}

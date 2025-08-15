@@ -34,6 +34,7 @@ process.on('SIGTERM', async () => {
 });
 
 let mainWindow: BrowserWindow | null = null;
+let floatingWindow: BrowserWindow | null = null;
 let wsServer: WebSocketServer | null = null;
 let recordingManager: RecordingManager | null = null;
 let screenshotManager: ScreenshotManager | null = null;
@@ -58,6 +59,34 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+}
+
+function createFloatingWindow() {
+  floatingWindow = new BrowserWindow({
+    width: 300,
+    height: 200,
+    alwaysOnTop: true,
+    frame: false,
+    transparent: true,
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  if (process.env.NODE_ENV === 'development') {
+    floatingWindow.loadURL('http://localhost:3000#/floating');
+  } else {
+    floatingWindow.loadFile(path.join(__dirname, '../renderer/index.html'), {
+      hash: '/floating'
+    });
+  }
+
+  floatingWindow.on('closed', () => {
+    floatingWindow = null;
   });
 }
 
@@ -120,6 +149,33 @@ app.on('before-quit', async (event) => {
 
 // Utility: convert all webm audio chunks for a session to mp3
 async function convertAudioChunksToMp3(sessionId: string) { /* removed: backend handles audio */ return { converted: 0, total: 0 }; }
+
+// IPC Handlers for floating window
+ipcMain.handle('open-floating-window', async () => {
+  if (!floatingWindow) {
+    createFloatingWindow();
+  }
+  return true;
+});
+
+ipcMain.handle('close-floating-window', async () => {
+  if (floatingWindow) {
+    floatingWindow.close();
+  }
+  return true;
+});
+
+ipcMain.handle('expand-to-main-window', async () => {
+  if (floatingWindow) {
+    floatingWindow.close();
+  }
+  if (!mainWindow) {
+    createWindow();
+  } else {
+    mainWindow.focus();
+  }
+  return true;
+});
 
 // IPC Handlers
 ipcMain.handle('get-sources', async () => {

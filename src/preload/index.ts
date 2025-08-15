@@ -40,6 +40,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getScreenshotsInRange: (sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => ipcRenderer.invoke('get-screenshots-in-range', sessionId, startTime, endTime, type),
   },
   
+  window: {
+    openFloatingWindow: () => ipcRenderer.invoke('open-floating-window'),
+    closeFloatingWindow: () => ipcRenderer.invoke('close-floating-window'),
+    expandToMainWindow: () => ipcRenderer.invoke('expand-to-main-window'),
+  },
+  
   // Event listeners
   on: (channel: string, callback: Function) => {
     const validChannels = [
@@ -92,6 +98,11 @@ export interface ElectronAPI {
     loadRecording: (sessionId: string) => Promise<any>;
     getScreenshotPath: (sessionId: string, timestamp: number, type: 'full' | 'thumb') => Promise<string>;
     getScreenshotsInRange: (sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => Promise<Array<{path: string; timestamp: number}>>;
+  };
+  window: {
+    openFloatingWindow: () => Promise<boolean>;
+    closeFloatingWindow: () => Promise<boolean>;
+    expandToMainWindow: () => Promise<boolean>;
   };
   on: (channel: string, callback: Function) => void;
   removeListener: (channel: string, callback: Function) => void;

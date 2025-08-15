@@ -4,11 +4,21 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 
 ## Features
 
+### 🪟 Floating Window for Recording
+- **Mini floating window** (300x200px) for unobtrusive recording
+- Always-on-top transparent window with draggable interface
+- Built-in Monaco Editor for real-time markdown note-taking
+- Recording controls with timer display
+- Settings popover for output path and audio configuration
+- One-click expand to full review window
+
 ### 🎥 Meeting Recording + Content-Aligned Playback
 - Synchronized screen, audio, and note recording
-- Automatic periodic screenshots (every 10 seconds)
-- Three-column review interface (note rendering, media timeline, AI assistant)
-- Audio track recording support (microphone/system sound) - in development
+- Automatic periodic screenshots (configurable: 10/30/60 seconds)
+- Enhanced review interface with Monaco Editor hover tooltips
+- Interactive screenshot preview on text hover
+- Double-click to insert screenshots into notes
+- Audio track recording support (microphone/system sound)
 
 ### 📸 Smart Screenshots + Command Operations
 - Hotkey screenshots (⌘+Shift+S)
@@ -19,7 +29,7 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 
 ### 📁 File Management
 - Custom output path selection for recordings
-- Automatic markdown notes storage
+- Automatic markdown notes storage with timestamps
 - Improved error handling for missing recordings
 - Screenshot rendering in review interface
 

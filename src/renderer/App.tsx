@@ -1,18 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RecordingPage } from './pages/RecordingPage';
 import { ScreenshotPage } from './pages/ScreenshotPage';
 import { ReviewPage } from './pages/ReviewPage';
+import { ReviewPageEnhanced } from './pages/ReviewPageEnhanced';
+import { FloatingWindow } from './components/FloatingWindow';
 
 type Page = 'recording' | 'screenshot' | 'review';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('recording');
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isFloatingMode, setIsFloatingMode] = useState(false);
+
+  useEffect(() => {
+    // Check if we're in floating mode based on URL hash
+    if (window.location.hash === '#/floating') {
+      setIsFloatingMode(true);
+    }
+  }, []);
 
   const handleRecordingComplete = (id: string) => {
     setSessionId(id);
     setCurrentPage('review');
   };
+
+  const handleExpand = async () => {
+    await window.electronAPI.window.expandToMainWindow();
+  };
+
+  const handleClose = async () => {
+    await window.electronAPI.window.closeFloatingWindow();
+  };
+
+  // Render floating window if in floating mode
+  if (isFloatingMode) {
+    return (
+      <div style={{ 
+        width: '100vw', 
+        height: '100vh', 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        backgroundColor: 'transparent'
+      }}>
+        <FloatingWindow onExpand={handleExpand} onClose={handleClose} />
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col">
@@ -64,7 +98,7 @@ function App() {
         )}
         {currentPage === 'screenshot' && <ScreenshotPage />}
         {currentPage === 'review' && sessionId && (
-          <ReviewPage sessionId={sessionId} />
+          <ReviewPageEnhanced sessionId={sessionId} />
         )}
       </main>
     </div>
