@@ -70,9 +70,11 @@ function createFloatingWindow() {
     minHeight: 200,
     alwaysOnTop: true,
     frame: false,
-    transparent: true,
+    transparent: false,  // Changed to false for better compatibility
     resizable: true,
     hasShadow: true,
+    backgroundColor: '#1f2937',  // Dark background color
+    titleBarStyle: 'hidden',  // Hide title bar but keep window controls on macOS
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -168,14 +170,25 @@ ipcMain.handle('close-floating-window', async () => {
   return true;
 });
 
-ipcMain.handle('expand-to-main-window', async () => {
+ipcMain.handle('expand-to-main-window', async (event, sessionId?: string, notes?: string) => {
   if (floatingWindow) {
     floatingWindow.close();
   }
   if (!mainWindow) {
     createWindow();
+    // Wait for window to be ready
+    mainWindow!.webContents.once('did-finish-load', () => {
+      // Send the session data to the main window
+      if (sessionId) {
+        mainWindow!.webContents.send('expanded-from-floating', { sessionId, notes });
+      }
+    });
   } else {
     mainWindow.focus();
+    // Send the session data to the existing main window
+    if (sessionId) {
+      mainWindow.webContents.send('expanded-from-floating', { sessionId, notes });
+    }
   }
   return true;
 });

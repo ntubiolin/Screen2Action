@@ -120,52 +120,16 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     <div className="floating-window" style={{
       width: '100%',
       height: '100%',
-      backgroundColor: 'rgba(31, 41, 55, 0.95)',
+      backgroundColor: '#1f2937',
       borderRadius: '8px',
       boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
       display: 'flex',
       flexDirection: 'column',
       position: 'relative',
-      border: '1px solid rgba(75, 85, 99, 0.5)'
+      border: '1px solid rgba(75, 85, 99, 0.5)',
+      overflow: 'hidden'
     }}>
-      {/* Resize Handle */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 0,
-          right: 0,
-          width: '20px',
-          height: '20px',
-          cursor: 'nwse-resize',
-          zIndex: 1000,
-          background: 'linear-gradient(135deg, transparent 50%, rgba(156, 163, 175, 0.5) 50%)',
-          borderBottomRightRadius: '8px'
-        }}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          // Allow native window resize
-          const startX = e.clientX;
-          const startY = e.clientY;
-          const startWidth = window.innerWidth;
-          const startHeight = window.innerHeight;
-
-          const handleMouseMove = (e: MouseEvent) => {
-            const newWidth = startWidth + e.clientX - startX;
-            const newHeight = startHeight + e.clientY - startY;
-            window.resizeTo(Math.max(300, newWidth), Math.max(200, newHeight));
-          };
-
-          const handleMouseUp = () => {
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-          };
-
-          document.addEventListener('mousemove', handleMouseMove);
-          document.addEventListener('mouseup', handleMouseUp);
-        }}
-      />
-      
-      {/* Top Toolbar */}
+      {/* Top Toolbar - Make it draggable */}
       <div className="toolbar" style={{
         height: '40px',
         padding: '8px',
@@ -173,8 +137,10 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         display: 'flex',
         alignItems: 'center',
         gap: '8px',
-        flexShrink: 0
-      }}>
+        flexShrink: 0,
+        WebkitAppRegion: 'drag',  // Makes the toolbar draggable on macOS/Windows
+        userSelect: 'none'
+      } as React.CSSProperties}>
         {!isRecording ? (
           <button
             onClick={handleStartRecording}
@@ -189,8 +155,9 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              fontSize: '12px'
-            }}
+              fontSize: '12px',
+              WebkitAppRegion: 'no-drag'  // Make button clickable
+            } as React.CSSProperties}
           >
             <span style={{
               width: '8px',
@@ -214,8 +181,9 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              fontSize: '12px'
-            }}
+              fontSize: '12px',
+              WebkitAppRegion: 'no-drag'
+            } as React.CSSProperties}
           >
             <span style={{
               width: '8px',
@@ -247,8 +215,9 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
               border: 'none',
               color: '#9ca3af',
               cursor: 'pointer',
-              fontSize: '16px'
-            }}
+              fontSize: '16px',
+              WebkitAppRegion: 'no-drag'
+            } as React.CSSProperties}
           >
             ⚙
           </button>
@@ -342,8 +311,9 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
             color: '#9ca3af',
             cursor: 'pointer',
             fontSize: '16px',
-            padding: '0 4px'
-          }}
+            padding: '0 4px',
+            WebkitAppRegion: 'no-drag'
+          } as React.CSSProperties}
         >
           ×
         </button>
@@ -391,8 +361,9 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
             cursor: 'pointer',
             fontSize: '12px',
             writingMode: 'vertical-rl',
-            textOrientation: 'mixed'
-          }}
+            textOrientation: 'mixed',
+            WebkitAppRegion: 'no-drag'
+          } as React.CSSProperties}
         >
           {showPreview ? '◀' : '▶'}
         </button>

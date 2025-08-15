@@ -16,20 +16,28 @@ function App() {
     // Check if we're in floating mode based on URL hash
     if (window.location.hash === '#/floating') {
       setIsFloatingMode(true);
-    } else {
-      // Check for expanded session data from floating window
-      const expandedSessionId = localStorage.getItem('expandedSessionId');
-      const expandedNotes = localStorage.getItem('expandedNotes');
-      
-      if (expandedSessionId) {
-        setSessionId(expandedSessionId);
+    }
+    
+    // Listen for expanded-from-floating event
+    const handleExpandedFromFloating = (data: { sessionId: string; notes?: string }) => {
+      console.log('Received expanded-from-floating event:', data);
+      if (data.sessionId) {
+        setSessionId(data.sessionId);
         setCurrentPage('review');
         
-        // Clean up localStorage
-        localStorage.removeItem('expandedSessionId');
-        localStorage.removeItem('expandedNotes');
+        // Store notes if needed for the review page
+        if (data.notes) {
+          // You can store this in a state or pass it to the review page
+          localStorage.setItem('expandedNotes', data.notes);
+        }
       }
-    }
+    };
+    
+    window.electronAPI.on('expanded-from-floating', handleExpandedFromFloating);
+    
+    return () => {
+      window.electronAPI.removeListener('expanded-from-floating', handleExpandedFromFloating);
+    };
   }, []);
 
   const handleRecordingComplete = (id: string) => {
@@ -38,15 +46,8 @@ function App() {
   };
 
   const handleExpand = async (passedSessionId?: string, passedNotes?: string) => {
-    // Store session data in localStorage for the main window to retrieve
-    if (passedSessionId) {
-      localStorage.setItem('expandedSessionId', passedSessionId);
-    }
-    if (passedNotes) {
-      localStorage.setItem('expandedNotes', passedNotes);
-    }
-    
-    await window.electronAPI.window.expandToMainWindow();
+    // Pass session data directly through IPC
+    await window.electronAPI.window.expandToMainWindow(passedSessionId, passedNotes);
   };
 
   const handleClose = async () => {

@@ -43,7 +43,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: {
     openFloatingWindow: () => ipcRenderer.invoke('open-floating-window'),
     closeFloatingWindow: () => ipcRenderer.invoke('close-floating-window'),
-    expandToMainWindow: () => ipcRenderer.invoke('expand-to-main-window'),
+    expandToMainWindow: (sessionId?: string, notes?: string) => ipcRenderer.invoke('expand-to-main-window', sessionId, notes),
   },
   
   // Event listeners
@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'ai-response',
       'error',
       'audio-conversion-complete',
+      'expanded-from-floating',
     ];
     
     if (validChannels.includes(channel)) {
@@ -102,7 +103,7 @@ export interface ElectronAPI {
   window: {
     openFloatingWindow: () => Promise<boolean>;
     closeFloatingWindow: () => Promise<boolean>;
-    expandToMainWindow: () => Promise<boolean>;
+    expandToMainWindow: (sessionId?: string, notes?: string) => Promise<boolean>;
   };
   on: (channel: string, callback: Function) => void;
   removeListener: (channel: string, callback: Function) => void;
