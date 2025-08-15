@@ -16,6 +16,19 @@ function App() {
     // Check if we're in floating mode based on URL hash
     if (window.location.hash === '#/floating') {
       setIsFloatingMode(true);
+    } else {
+      // Check for expanded session data from floating window
+      const expandedSessionId = localStorage.getItem('expandedSessionId');
+      const expandedNotes = localStorage.getItem('expandedNotes');
+      
+      if (expandedSessionId) {
+        setSessionId(expandedSessionId);
+        setCurrentPage('review');
+        
+        // Clean up localStorage
+        localStorage.removeItem('expandedSessionId');
+        localStorage.removeItem('expandedNotes');
+      }
     }
   }, []);
 
@@ -24,7 +37,15 @@ function App() {
     setCurrentPage('review');
   };
 
-  const handleExpand = async () => {
+  const handleExpand = async (passedSessionId?: string, passedNotes?: string) => {
+    // Store session data in localStorage for the main window to retrieve
+    if (passedSessionId) {
+      localStorage.setItem('expandedSessionId', passedSessionId);
+    }
+    if (passedNotes) {
+      localStorage.setItem('expandedNotes', passedNotes);
+    }
+    
     await window.electronAPI.window.expandToMainWindow();
   };
 

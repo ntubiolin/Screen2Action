@@ -7,7 +7,7 @@ import { ScreenshotManager } from './screenshot';
 // Enable live reload for Electron in development
 if (process.env.NODE_ENV !== 'production') {
   // Path from dist/main to project root's node_modules
-  const electronPath = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'electron');
+  const electronPath = path.join(__dirname, '..', '..', '..', '..', 'node_modules', '.bin', 'electron');
   require('electron-reload')(path.join(__dirname, '..'), {
     electron: electronPath,
     hardResetMethod: 'exit'
@@ -64,12 +64,15 @@ function createWindow() {
 
 function createFloatingWindow() {
   floatingWindow = new BrowserWindow({
-    width: 300,
-    height: 200,
+    width: 400,
+    height: 300,
+    minWidth: 300,
+    minHeight: 200,
     alwaysOnTop: true,
     frame: false,
     transparent: true,
     resizable: true,
+    hasShadow: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 
 interface FloatingWindowProps {
-  onExpand: () => void;
+  onExpand: (sessionId?: string, notes?: string) => void;
   onClose: () => void;
 }
 
@@ -17,6 +17,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const [audioTracking, setAudioTracking] = useState({ mic: true, system: true });
   const [screenshotCount, setScreenshotCount] = useState(0);
   const [isReadOnly, setIsReadOnly] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const editorRef = useRef<any>(null);
@@ -50,17 +51,40 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   };
 
   const handleStartRecording = async () => {
-    recordingStartTimeRef.current = Date.now();
-    setIsRecording(true);
-    setIsReadOnly(false);
-    setRecordingTime(0);
-    setScreenshotCount(0);
-    headingTsRef.current = {};
+    try {
+      // Generate a session ID
+      const newSessionId = `session_${Date.now()}`;
+      setSessionId(newSessionId);
+      
+      recordingStartTimeRef.current = Date.now();
+      setIsRecording(true);
+      setIsReadOnly(false);
+      setRecordingTime(0);
+      setScreenshotCount(0);
+      headingTsRef.current = {};
+      
+      // You can add actual recording start logic here
+      // await window.electronAPI.recording.start(screenId);
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+    }
   };
 
   const handleStopRecording = async () => {
-    setIsRecording(false);
-    setIsReadOnly(true);
+    try {
+      setIsRecording(false);
+      setIsReadOnly(true);
+      
+      // Save the notes if needed
+      if (sessionId && notes.trim()) {
+        await window.electronAPI.file.saveMarkdown(sessionId, notes);
+      }
+      
+      // You can add actual recording stop logic here
+      // await window.electronAPI.recording.stop();
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+    }
   };
 
   const selectOutputPath = async () => {
@@ -94,8 +118,8 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
 
   return (
     <div className="floating-window" style={{
-      width: '300px',
-      height: '200px',
+      width: '100%',
+      height: '100%',
       backgroundColor: 'rgba(31, 41, 55, 0.95)',
       borderRadius: '8px',
       boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
@@ -104,6 +128,43 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       position: 'relative',
       border: '1px solid rgba(75, 85, 99, 0.5)'
     }}>
+      {/* Resize Handle */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          right: 0,
+          width: '20px',
+          height: '20px',
+          cursor: 'nwse-resize',
+          zIndex: 1000,
+          background: 'linear-gradient(135deg, transparent 50%, rgba(156, 163, 175, 0.5) 50%)',
+          borderBottomRightRadius: '8px'
+        }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          // Allow native window resize
+          const startX = e.clientX;
+          const startY = e.clientY;
+          const startWidth = window.innerWidth;
+          const startHeight = window.innerHeight;
+
+          const handleMouseMove = (e: MouseEvent) => {
+            const newWidth = startWidth + e.clientX - startX;
+            const newHeight = startHeight + e.clientY - startY;
+            window.resizeTo(Math.max(300, newWidth), Math.max(200, newHeight));
+          };
+
+          const handleMouseUp = () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+          };
+
+          document.addEventListener('mousemove', handleMouseMove);
+          document.addEventListener('mouseup', handleMouseUp);
+        }}
+      />
+      
       {/* Top Toolbar */}
       <div className="toolbar" style={{
         height: '40px',
@@ -379,7 +440,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         {/* Expand button when recording is stopped */}
         {isReadOnly && (
           <button
-            onClick={onExpand}
+            onClick={() => onExpand(sessionId || undefined, notes)}
             style={{
               backgroundColor: '#3b82f6',
               color: 'white',
