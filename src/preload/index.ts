@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  platform: process.platform,
   recording: {
     start: (screenId: string) => ipcRenderer.invoke('start-recording', screenId),
     stop: () => ipcRenderer.invoke('stop-recording'),
@@ -69,6 +70,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 // Type definitions for TypeScript
 export interface ElectronAPI {
+  platform: NodeJS.Platform;
   recording: {
     start: (screenId: string) => Promise<string>;
     stop: () => Promise<{ duration: number; sessionId: string | null }>;

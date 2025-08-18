@@ -6,38 +6,138 @@ interface ReviewPageEnhancedProps {
   sessionId: string;
 }
 
+interface ParsedNote {
+  content: string;
+  timestamp: number;
+}
+
 export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionId }) => {
   const [markdownContent, setMarkdownContent] = useState('');
+  const [parsedNotes, setParsedNotes] = useState<ParsedNote[]>([]);
   const [hoveredTimestamp, setHoveredTimestamp] = useState<number | null>(null);
   const [hoveredPosition, setHoveredPosition] = useState<{ x: number; y: number } | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [audioPath, setAudioPath] = useState<string>('');
+  const [recordingMetadata, setRecordingMetadata] = useState<any>(null);
   
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const decorationsRef = useRef<string[]>([]);
-  const { notes } = useRecordingStore();
+  const { notes: storeNotes } = useRecordingStore();
 
   useEffect(() => {
     loadMarkdownFile();
     loadAudioPath();
   }, [sessionId]);
 
+  const parseMarkdownToNotes = (markdown: string, duration: number): ParsedNote[] => {
+    const lines = markdown.split('\n');
+    const notes: ParsedNote[] = [];
+    const headingRegex = /^#{1,6}\s+/;
+    
+    let currentSection: string[] = [];
+    let currentTimestamp: number | null = null;
+    
+    lines.forEach((line, index) => {
+      // Check if line is a heading
+      if (headingRegex.test(line)) {
+        // Save previous section if exists
+        if (currentSection.length > 0) {
+          const content = currentSection.join('\n').trim();
+          if (content) {
+            notes.push({
+              content,
+              timestamp: currentTimestamp || 0
+            });
+          }
+        }
+        
+        // Start new section
+        currentSection = [line];
+        
+        // Try to extract timestamp from [MM:SS] format in heading
+        const tsMatch = line.match(/\[(\d{2}):(\d{2})\]/);
+        if (tsMatch) {
+          const minutes = parseInt(tsMatch[1], 10);
+          const seconds = parseInt(tsMatch[2], 10);
+          currentTimestamp = (minutes * 60 + seconds) * 1000;
+        } else {
+          currentTimestamp = null;
+        }
+      } else {
+        currentSection.push(line);
+      }
+    });
+    
+    // Add the last section
+    if (currentSection.length > 0) {
+      const content = currentSection.join('\n').trim();
+      if (content) {
+        notes.push({
+          content,
+          timestamp: currentTimestamp || 0
+        });
+      }
+    }
+    
+    // If no sections found, treat the whole content as one note
+    if (notes.length === 0 && markdown.trim()) {
+      notes.push({
+        content: markdown.trim(),
+        timestamp: 0
+      });
+    }
+    
+    // Distribute timestamps evenly if not specified
+    if (notes.length > 0 && duration > 0) {
+      const timePerNote = duration / notes.length;
+      parsedNotes.forEach((note, index) => {
+        if (note.timestamp === 0 && index > 0) {
+          note.timestamp = Math.floor(index * timePerNote);
+        }
+      });
+    }
+    
+    return notes;
+  };
+
   const loadMarkdownFile = async () => {
     try {
+      // Load recording metadata which includes markdown notes
       const metadata = await window.electronAPI.file.loadRecording(sessionId);
-      // Load markdown notes from file
-      const fs = require('fs').promises;
-      const path = require('path');
-      const sessionDir = path.join(process.cwd(), 'recordings', sessionId);
-      const markdownPath = path.join(sessionDir, 'notes.md');
-      const content = await fs.readFile(markdownPath, 'utf-8');
-      setMarkdownContent(content || '# Recording Notes\n\nNo notes available for this session.');
+      setRecordingMetadata(metadata);
+      
+      if (metadata && metadata.notes) {
+        setMarkdownContent(metadata.notes);
+        // Parse the markdown to extract notes with timestamps
+        const parsed = parseMarkdownToNotes(metadata.notes, metadata.duration || 0);
+        setParsedNotes(parsed);
+      } else if (storeNotes.length > 0) {
+        // Use notes from store if available
+        const content = storeNotes.map(note => note.content).join('\n\n');
+        setMarkdownContent(content);
+        setParsedNotes(storeNotes.map(note => ({
+          content: note.content,
+          timestamp: note.timestamp
+        })));
+      } else {
+        setMarkdownContent('# Recording Notes\n\nNo notes available for this session.');
+        setParsedNotes([]);
+      }
     } catch (error) {
       console.error('Failed to load markdown:', error);
-      // Construct markdown from notes if file not found
-      const content = notes.map(note => note.content).join('\n\n');
-      setMarkdownContent(content || '# Recording Notes\n\nNo notes available for this session.');
+      // Use notes from store as fallback
+      if (storeNotes.length > 0) {
+        const content = storeNotes.map(note => note.content).join('\n\n');
+        setMarkdownContent(content);
+        setParsedNotes(storeNotes.map(note => ({
+          content: note.content,
+          timestamp: note.timestamp
+        })));
+      } else {
+        setMarkdownContent('# Recording Notes\n\nNo notes available for this session.');
+        setParsedNotes([]);
+      }
     }
   };
 
@@ -74,8 +174,8 @@ export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionI
         let currentOffset = 0;
         let noteIndex = -1;
         
-        for (let i = 0; i < notes.length; i++) {
-          const noteLength = notes[i].content.length;
+        for (let i = 0; i < parsedNotes.length; i++) {
+          const noteLength = parsedNotes[i].content.length;
           if (currentOffset <= lineOffset && lineOffset < currentOffset + noteLength) {
             noteIndex = i;
             break;
@@ -85,9 +185,9 @@ export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionI
 
         if (noteIndex === -1) return null;
 
-        const timestamp = notes[noteIndex].timestamp;
-        const endTimestamp = noteIndex < notes.length - 1 
-          ? notes[noteIndex + 1].timestamp 
+        const timestamp = parsedNotes[noteIndex].timestamp;
+        const endTimestamp = noteIndex < parsedNotes.length - 1 
+          ? parsedNotes[noteIndex + 1].timestamp 
           : timestamp + 5000; // 5 seconds for last note
 
         // Load screenshot for this timestamp
@@ -130,8 +230,8 @@ export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionI
       let currentOffset = 0;
       let noteIndex = -1;
       
-      for (let i = 0; i < notes.length; i++) {
-        const noteLength = notes[i].content.length;
+      for (let i = 0; i < parsedNotes.length; i++) {
+        const noteLength = parsedNotes[i].content.length;
         if (currentOffset <= lineOffset && lineOffset < currentOffset + noteLength) {
           noteIndex = i;
           break;
@@ -140,7 +240,7 @@ export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionI
       }
 
       if (noteIndex !== -1) {
-        setHoveredTimestamp(notes[noteIndex].timestamp);
+        setHoveredTimestamp(parsedNotes[noteIndex].timestamp);
         setHoveredPosition({
           x: e.event.posx,
           y: e.event.posy
@@ -156,7 +256,7 @@ export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionI
       const newDecorations: any[] = [];
       let currentLine = 1;
       
-      notes.forEach((note, index) => {
+      parsedNotes.forEach((note, index) => {
         const lines = note.content.split('\n');
         const firstLine = currentLine;
         
@@ -197,8 +297,8 @@ export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionI
     let currentOffset = 0;
     let noteIndex = -1;
     
-    for (let i = 0; i < notes.length; i++) {
-      const noteLength = notes[i].content.length;
+    for (let i = 0; i < parsedNotes.length; i++) {
+      const noteLength = parsedNotes[i].content.length;
       if (currentOffset <= lineOffset && lineOffset < currentOffset + noteLength) {
         noteIndex = i;
         break;
@@ -208,7 +308,7 @@ export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionI
 
     if (noteIndex === -1) return;
 
-    const timestamp = notes[noteIndex].timestamp;
+    const timestamp = parsedNotes[noteIndex].timestamp;
     
     try {
       const screenshotPath = await window.electronAPI.file.getScreenshotPath(
@@ -277,11 +377,46 @@ export const ReviewPageEnhanced: React.FC<ReviewPageEnhancedProps> = ({ sessionI
 
       {/* Header */}
       <div className="bg-gray-800 p-4 border-b border-gray-700">
-        <h1 className="text-xl font-semibold text-white">Review Session - Enhanced Monaco Editor</h1>
+        <h1 className="text-xl font-semibold text-white">Review Session</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Hover over text to see screenshots • Double-click to insert images
+          Session ID: {sessionId}
         </p>
       </div>
+
+      {/* Audio Player */}
+      {audioPath && (
+        <div className="bg-gray-800 p-4 border-b border-gray-700">
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-gray-400">🎵 Session Audio:</span>
+            <audio 
+              controls 
+              className="flex-1"
+              src={`file://${audioPath}`}
+              style={{ maxWidth: '600px' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Screenshot Timeline */}
+      {parsedNotes.length > 0 && (
+        <div className="bg-gray-800 p-4 border-b border-gray-700">
+          <div className="text-sm text-gray-400 mb-2">📸 Screenshots Timeline:</div>
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {parsedNotes.map((note, index) => (
+              <div key={index} className="flex-shrink-0">
+                <ScreenshotPreview 
+                  sessionId={sessionId} 
+                  timestamp={note.timestamp} 
+                />
+                <div className="text-xs text-gray-500 text-center mt-1">
+                  {formatTimestamp(note.timestamp)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Monaco Editor */}
       <div className="flex-1 p-4">
@@ -375,16 +510,16 @@ const ScreenshotPreview: React.FC<{ sessionId: string; timestamp: number }> = ({
 
   if (loading) {
     return (
-      <div className="w-full h-32 bg-gray-700 rounded animate-pulse flex items-center justify-center">
-        <span className="text-gray-500">Loading...</span>
+      <div className="w-32 h-20 bg-gray-700 rounded animate-pulse flex items-center justify-center">
+        <span className="text-xs text-gray-500">Loading...</span>
       </div>
     );
   }
 
   if (!imagePath) {
     return (
-      <div className="w-full h-32 bg-gray-700 rounded flex items-center justify-center">
-        <span className="text-gray-500">No screenshot</span>
+      <div className="w-32 h-20 bg-gray-700 rounded flex items-center justify-center">
+        <span className="text-xs text-gray-500">No image</span>
       </div>
     );
   }
@@ -393,8 +528,7 @@ const ScreenshotPreview: React.FC<{ sessionId: string; timestamp: number }> = ({
     <img 
       src={`file://${imagePath}`}
       alt="Screenshot preview"
-      className="w-full rounded border border-gray-600"
-      style={{ maxHeight: '200px', objectFit: 'contain' }}
+      className="w-32 h-20 object-cover rounded border border-gray-600"
     />
   );
 };

@@ -19,17 +19,11 @@ function App() {
     }
     
     // Listen for expanded-from-floating event
-    const handleExpandedFromFloating = (data: { sessionId: string; notes?: string }) => {
+    const handleExpandedFromFloating = (data: { sessionId: string }) => {
       console.log('Received expanded-from-floating event:', data);
       if (data.sessionId) {
         setSessionId(data.sessionId);
         setCurrentPage('review');
-        
-        // Store notes if needed for the review page
-        if (data.notes) {
-          // You can store this in a state or pass it to the review page
-          localStorage.setItem('expandedNotes', data.notes);
-        }
       }
     };
     
@@ -46,8 +40,8 @@ function App() {
   };
 
   const handleExpand = async (passedSessionId?: string, passedNotes?: string) => {
-    // Pass session data directly through IPC
-    await window.electronAPI.window.expandToMainWindow(passedSessionId, passedNotes);
+    // Pass only sessionId through IPC (notes are already saved to disk)
+    await window.electronAPI.window.expandToMainWindow(passedSessionId);
   };
 
   const handleClose = async () => {
@@ -70,8 +64,10 @@ function App() {
     );
   }
 
+  const isMacOS = window.electronAPI.platform === 'darwin';
+  
   return (
-    <div className="h-screen bg-gray-900 text-white flex flex-col">
+    <div className={`h-screen bg-gray-900 text-white flex flex-col ${isMacOS ? 'pt-7' : ''}`}>
       <nav className="bg-gray-800 border-b border-gray-700 flex-shrink-0">
         <div className="px-4 py-3">
           <div className="flex items-center space-x-4">

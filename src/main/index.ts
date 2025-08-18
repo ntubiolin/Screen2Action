@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, desktopCapturer, dialog, Menu } from 'electron';
 import path from 'path';
 import { WebSocketServer } from './websocket';
 import { RecordingManager } from './recording';
@@ -43,6 +43,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -96,7 +97,73 @@ function createFloatingWindow() {
 }
 
 app.whenReady().then(async () => {
-  createWindow();
+  // Create application menu
+  const template: any[] = [
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Floating Window',
+          click: () => {
+            if (!floatingWindow) {
+              createFloatingWindow();
+            } else {
+              floatingWindow.focus();
+            }
+          }
+        },
+        {
+          label: 'Main Window',
+          click: () => {
+            if (!mainWindow) {
+              createWindow();
+            } else {
+              mainWindow.focus();
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Reload',
+          accelerator: 'CmdOrCtrl+R',
+          click: (item: any, focusedWindow: BrowserWindow | undefined) => {
+            if (focusedWindow) focusedWindow.reload();
+          }
+        },
+        {
+          label: 'Toggle Developer Tools',
+          accelerator: process.platform === 'darwin' ? 'Alt+Command+I' : 'Ctrl+Shift+I',
+          click: (item: any, focusedWindow: BrowserWindow | undefined) => {
+            if (focusedWindow) focusedWindow.webContents.toggleDevTools();
+          }
+        }
+      ]
+    }
+  ];
+
+  // Add macOS app menu
+  if (process.platform === 'darwin') {
+    template.unshift({
+      label: app.getName(),
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services', submenu: [] },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    });
+  }
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+
+  // Start with floating window as default
+  createFloatingWindow();
   
   // Initialize managers
   wsServer = new WebSocketServer();
@@ -126,7 +193,8 @@ app.whenReady().then(async () => {
   
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      // Create floating window on activate as well
+      createFloatingWindow();
     }
   });
 });
@@ -178,16 +246,16 @@ ipcMain.handle('expand-to-main-window', async (event, sessionId?: string, notes?
     createWindow();
     // Wait for window to be ready
     mainWindow!.webContents.once('did-finish-load', () => {
-      // Send the session data to the main window
+      // Send only the sessionId to the main window (notes are already saved to disk)
       if (sessionId) {
-        mainWindow!.webContents.send('expanded-from-floating', { sessionId, notes });
+        mainWindow!.webContents.send('expanded-from-floating', { sessionId });
       }
     });
   } else {
     mainWindow.focus();
-    // Send the session data to the existing main window
+    // Send only the sessionId to the existing main window (notes are already saved to disk)
     if (sessionId) {
-      mainWindow.webContents.send('expanded-from-floating', { sessionId, notes });
+      mainWindow.webContents.send('expanded-from-floating', { sessionId });
     }
   }
   return true;
@@ -313,10 +381,29 @@ ipcMain.handle('get-complete-audio-path', async (_, sessionId: string, track: 'm
   const backendAudioDir = path.join(process.cwd(), 'backend', 'recordings', sessionId, 'audio');
   const frontendAudioDir = path.join(process.cwd(), 'recordings', sessionId, 'audio');
   
-  const recordingsDir = fs.existsSync(backendAudioDir) ? backendAudioDir : frontendAudioDir;
+  // Check which directory exists, or neither
+  let recordingsDir: string;
+  if (fs.existsSync(backendAudioDir)) {
+    recordingsDir = backendAudioDir;
+  } else if (fs.existsSync(frontendAudioDir)) {
+    recordingsDir = frontendAudioDir;
+  } else {
+    console.error(`Audio directory not found for session ${sessionId}`);
+    // Create directory for new recordings
+    const newDir = path.join(process.cwd(), 'recordings', sessionId, 'audio');
+    fs.mkdirSync(newDir, { recursive: true });
+    return ''; // Return empty string if no audio files exist yet
+  }
   
   try {
     const files = fs.readdirSync(recordingsDir);
+    
+    // If no files, return empty string
+    if (files.length === 0) {
+      console.log(`No audio files in ${recordingsDir} yet`);
+      return '';
+    }
+    
     // Look for complete audio file with pattern: YYYY_MM_DD_HH_mm_SS_full_<track>.wav
     const completeFile = files.find((f: string) => f.includes('_full_') && f.includes(`_${track}.wav`));
     
@@ -332,10 +419,11 @@ ipcMain.handle('get-complete-audio-path', async (_, sessionId: string, track: 'm
       return path.join(recordingsDir, trackFile);
     }
     
-    throw new Error(`No ${track} audio file found for session`);
+    console.log(`No ${track} audio file found for session yet`);
+    return ''; // Return empty string instead of throwing error
   } catch (error) {
     console.error(`Error finding complete audio file: ${error}`);
-    throw new Error('Complete audio file not found');
+    return ''; // Return empty string instead of throwing error
   }
 });
 
@@ -464,6 +552,10 @@ ipcMain.handle('save-markdown', async (_, sessionId: string, content: string) =>
   const fs = require('fs').promises;
   const pathMod = require('path');
   const sessionDir = pathMod.join(process.cwd(), 'recordings', sessionId);
+  
+  // Ensure the directory exists
+  await fs.mkdir(sessionDir, { recursive: true });
+  
   // Helper to build datetime prefix
   const now = new Date();
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -503,7 +595,18 @@ ipcMain.handle('load-recording', async (_, sessionId: string) => {
   } catch {
     // Create recordings directory if it doesn't exist
     await fs.mkdir(recordingsDir, { recursive: true });
-    throw new Error('No recordings found. The recordings directory has been created.');
+    // Return empty metadata for new session
+    console.log(`Creating new session directory for ${sessionId}`);
+    await fs.mkdir(sessionDir, { recursive: true });
+    const defaultMetadata = {
+      sessionId,
+      startTime: Date.now(),
+      endTime: null,
+      duration: 0,
+      notes: ''
+    };
+    await fs.writeFile(metadataPath, JSON.stringify(defaultMetadata, null, 2));
+    return defaultMetadata;
   }
   
   try {
@@ -511,11 +614,47 @@ ipcMain.handle('load-recording', async (_, sessionId: string) => {
     await fs.access(sessionDir);
     
     // Check if metadata file exists
-    const metadata = await fs.readFile(metadataPath, 'utf-8');
-    return JSON.parse(metadata);
+    const metadataContent = await fs.readFile(metadataPath, 'utf-8');
+    const metadata = JSON.parse(metadataContent);
+    
+    // Normalize metadata format (handle both Python backend and JS frontend formats)
+    const normalizedMetadata: any = {
+      sessionId: metadata.id || metadata.sessionId || sessionId,
+      startTime: metadata.start_time ? new Date(metadata.start_time).getTime() : metadata.startTime,
+      endTime: metadata.end_time ? new Date(metadata.end_time).getTime() : metadata.endTime,
+      duration: metadata.duration || 0,
+      notes: metadata.notes || ''
+    };
+    
+    // Try to load notes from markdown file if not in metadata
+    if (!normalizedMetadata.notes || (Array.isArray(normalizedMetadata.notes) && normalizedMetadata.notes.length === 0)) {
+      try {
+        // Try to find markdown file with datetime prefix
+        const files = await fs.readdir(sessionDir);
+        const noteFile = files.find((f: string) => f.endsWith('_notes.md')) || 'notes.md';
+        const notePath = path.join(sessionDir, noteFile);
+        normalizedMetadata.notes = await fs.readFile(notePath, 'utf-8');
+      } catch {
+        // No notes file found
+        normalizedMetadata.notes = '';
+      }
+    }
+    
+    return normalizedMetadata;
   } catch (error: any) {
     if (error.code === 'ENOENT') {
-      throw new Error(`Recording with session ID "${sessionId}" not found. Please check if the recording exists.`);
+      // Create session directory and default metadata if not exists
+      console.log(`Creating session directory for ${sessionId}`);
+      await fs.mkdir(sessionDir, { recursive: true });
+      const defaultMetadata = {
+        sessionId,
+        startTime: Date.now(),
+        endTime: null,
+        duration: 0,
+        notes: ''
+      };
+      await fs.writeFile(metadataPath, JSON.stringify(defaultMetadata, null, 2));
+      return defaultMetadata;
     }
     console.error('Failed to load recording:', error);
     throw new Error(`Failed to load recording: ${error.message}`);
