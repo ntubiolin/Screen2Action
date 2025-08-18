@@ -4,6 +4,7 @@ import { ScreenshotPage } from './pages/ScreenshotPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { ReviewPageEnhanced } from './pages/ReviewPageEnhanced';
 import { ReviewPageWithWidgets } from './pages/ReviewPageWithWidgets';
+import { ReviewPageSidebar } from './pages/ReviewPageSidebar';
 import { FloatingWindow } from './components/FloatingWindow';
 
 type Page = 'recording' | 'screenshot' | 'review';
@@ -122,7 +123,7 @@ function App() {
         )}
         {currentPage === 'screenshot' && <ScreenshotPage />}
         {currentPage === 'review' && sessionId && (
-          <ReviewPageWithWidgets sessionId={sessionId} />
+          <ReviewPageSidebar sessionId={sessionId} />
         )}
       </main>
     </div>
