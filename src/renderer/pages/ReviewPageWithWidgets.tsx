@@ -125,8 +125,9 @@ export const ReviewPageWithWidgets: React.FC<ReviewPageWithWidgetsProps> = ({ se
         // Create DOM node for the widget
         const domNode = document.createElement('div');
         domNode.className = 'paragraph-widget-container';
-        domNode.style.marginTop = '8px';
-        domNode.style.marginBottom = '8px';
+        domNode.style.pointerEvents = 'auto';
+        domNode.style.position = 'relative';
+        domNode.style.zIndex = '1';
 
         // Find the end timestamp (next note's timestamp or recording end)
         const nextNoteIndex = parsedNotes.findIndex(n => n.timestamp > note.timestamp);
@@ -141,6 +142,7 @@ export const ReviewPageWithWidgets: React.FC<ReviewPageWithWidgetsProps> = ({ se
         const root = ReactDOM.createRoot(domNode);
         root.render(
           <ParagraphWidget
+            key={`${sessionId}-${note.lineNumber}-${note.timestamp}`}
             sessionId={sessionId}
             timestamp={note.timestamp}
             endTimestamp={endTimestamp}
@@ -155,12 +157,12 @@ export const ReviewPageWithWidgets: React.FC<ReviewPageWithWidgetsProps> = ({ se
           id: widgetId,
           domNode,
           afterLineNumber: Math.max(0, note.lineNumber - 1),
-          heightInPx: 120
+          heightInPx: 136
         });
 
         newZones.push({
           afterLineNumber: Math.max(0, note.lineNumber - 1),
-          heightInPx: 120,
+          heightInPx: 136,
           domNode: domNode,
           suppressMouseDown: true
         });
@@ -229,12 +231,22 @@ export const ReviewPageWithWidgets: React.FC<ReviewPageWithWidgetsProps> = ({ se
         sectionStartLine = currentLineNumber;
         isH1Section = h1Regex.test(line);
         
-        // Try to extract timestamp from [MM:SS] format in heading
-        const tsMatch = line.match(/\[(\d{2}):(\d{2})\]/);
+        // Try to extract timestamp from various formats in heading
+        // Supports [MM:SS], [HH:MM:SS], or [M:SS]
+        const tsMatch = line.match(/\[(\d{1,3}):(\d{2})(?::(\d{2}))?\]/);
         if (tsMatch) {
-          const minutes = parseInt(tsMatch[1], 10);
-          const seconds = parseInt(tsMatch[2], 10);
-          currentTimestamp = (minutes * 60 + seconds) * 1000;
+          if (tsMatch[3]) {
+            // HH:MM:SS format
+            const hours = parseInt(tsMatch[1], 10);
+            const minutes = parseInt(tsMatch[2], 10);
+            const seconds = parseInt(tsMatch[3], 10);
+            currentTimestamp = ((hours * 3600) + (minutes * 60) + seconds) * 1000;
+          } else {
+            // MM:SS or M:SS format
+            const minutes = parseInt(tsMatch[1], 10);
+            const seconds = parseInt(tsMatch[2], 10);
+            currentTimestamp = (minutes * 60 + seconds) * 1000;
+          }
         } else {
           currentTimestamp = null;
         }
@@ -420,7 +432,7 @@ export const ReviewPageWithWidgets: React.FC<ReviewPageWithWidgetsProps> = ({ se
         setAiResponse(result.response || 'No response received');
       } else {
         // Fallback to standard AI service
-        const result = await window.electronAPI.ai.enhanceNote({
+        const result = await (window as any).electronAPI.ai.enhanceNote({
           note: chatContext?.note.content || '',
           prompt: aiPrompt,
           sessionId: sessionId
@@ -533,10 +545,12 @@ export const ReviewPageWithWidgets: React.FC<ReviewPageWithWidgetsProps> = ({ se
           font-weight: bold;
         }
         .paragraph-widget-container {
-          padding: 0 20px;
-        }
-        .monaco-editor .view-zones {
+          padding: 8px 20px;
           position: relative;
+          z-index: 1;
+        }
+        .monaco-editor .view-zones .view-zone {
+          pointer-events: auto;
         }
       `}</style>
 
@@ -589,7 +603,7 @@ export const ReviewPageWithWidgets: React.FC<ReviewPageWithWidgetsProps> = ({ se
               suggestOnTriggerCharacters: false,
               acceptSuggestionOnCommitCharacter: false,
               tabCompletion: 'off',
-              wordBasedSuggestions: false
+              wordBasedSuggestions: 'off'
             }}
           />
         </div>
