@@ -3,13 +3,19 @@ import { RecordingPage } from './pages/RecordingPage';
 import { ScreenshotPage } from './pages/ScreenshotPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { ReviewPageEnhanced } from './pages/ReviewPageEnhanced';
+import { ReviewPageWithWidgets } from './pages/ReviewPageWithWidgets';
 import { FloatingWindow } from './components/FloatingWindow';
 
 type Page = 'recording' | 'screenshot' | 'review';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('recording');
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // Check for test mode from URL parameters
+  const urlParams = new URLSearchParams(window.location.search);
+  const testMode = urlParams.get('testMode');
+  const testSessionId = urlParams.get('sessionId');
+  
+  const [currentPage, setCurrentPage] = useState<Page>(testMode === 'review' ? 'review' : 'recording');
+  const [sessionId, setSessionId] = useState<string | null>(testSessionId || null);
   const [isFloatingMode, setIsFloatingMode] = useState(false);
 
   useEffect(() => {
@@ -116,7 +122,7 @@ function App() {
         )}
         {currentPage === 'screenshot' && <ScreenshotPage />}
         {currentPage === 'review' && sessionId && (
-          <ReviewPageEnhanced sessionId={sessionId} />
+          <ReviewPageWithWidgets sessionId={sessionId} />
         )}
       </main>
     </div>

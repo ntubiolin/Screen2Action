@@ -6,6 +6,9 @@
     "dev": "npm run dev:renderer & npm run dev:electron",
     "dev:renderer": "vite",
     "dev:electron": "tsc -p tsconfig.electron.json --watch & nodemon --delay 2 --watch dist/main --exec electron . --ext js",
+    "dev:review": "vite serve --config vite.config.dev.mjs",
+    "test:review": "./test-review-simple.sh",
+    "test:review:full": "./test-review-full.sh",
     "build": "npm run build:renderer && npm run build:electron",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
@@ -36,6 +39,7 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "lucide-react": "^0.539.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^10.1.0",
