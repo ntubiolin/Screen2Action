@@ -693,8 +693,8 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
 
       {/* Floating single toggle button (always visible) */}
       <div
-        className="fixed z-40"
-        style={{ top: rootTop + 8, right: 12 }}
+        className="fixed z-40 transition-all duration-200 ease-out"
+        style={{ top: rootTop + 12, right: `calc(${sidebarOpen ? '24rem' : '0px'} + 8px)` }}
       >
         <button
           onClick={() => setSidebarOpen(prev => !prev)}
