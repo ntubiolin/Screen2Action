@@ -101,8 +101,11 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   // Load audio path
   const loadAudioPath = async () => {
     try {
-      const path = await window.electronAPI.file.getCompleteAudioPath(sessionId, 'mix');
-      setAudioPath(path);
+      // Fix: Use audio.getCompleteAudioPath instead of file.getCompleteAudioPath
+      const path = await window.electronAPI.audio.getCompleteAudioPath(sessionId, 'mix');
+      if (path) {
+        setAudioPath(path);
+      }
     } catch (error) {
       console.error('Failed to load audio path:', error);
     }
@@ -432,7 +435,9 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
         audioRef.current = null;
       }
 
-      const audio = new Audio(`file://${audioPath}`);
+      // Add file:// prefix if not already present
+      const audioUrl = audioPath.startsWith('file://') ? audioPath : `file://${audioPath}`;
+      const audio = new Audio(audioUrl);
       audioRef.current = audio;
       
       // Calculate end time

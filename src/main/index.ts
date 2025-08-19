@@ -3,11 +3,12 @@ import path from 'path';
 import { WebSocketServer } from './websocket';
 import { RecordingManager } from './recording';
 import { ScreenshotManager } from './screenshot';
+import { getRecordingsDir } from './config';
 
 // Enable live reload for Electron in development
 if (process.env.NODE_ENV !== 'production') {
   // Path from dist/main to project root's node_modules
-  const electronPath = path.join(__dirname, '..', '..', '..', '..', 'node_modules', '.bin', 'electron');
+  const electronPath = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'electron');
   require('electron-reload')(path.join(__dirname, '..'), {
     electron: electronPath,
     hardResetMethod: 'exit'
@@ -351,6 +352,28 @@ ipcMain.handle('send-to-ai', async (_, data: any) => {
   throw new Error('WebSocket server not initialized');
 });
 
+ipcMain.handle('enhance-note', async (_, data: any) => {
+  if (wsServer) {
+    return await wsServer.sendMessage({
+      type: 'request',
+      action: 'enhance_note',
+      payload: data,
+    });
+  }
+  throw new Error('WebSocket server not initialized');
+});
+
+ipcMain.handle('process-mcp', async (_, data: any) => {
+  if (wsServer) {
+    return await wsServer.sendMessage({
+      type: 'request',
+      action: 'process_mcp',
+      payload: data,
+    });
+  }
+  throw new Error('WebSocket server not initialized');
+});
+
 // Audio handlers
 ipcMain.handle('play-audio', async (_, filePath: string) => {
   const fs = require('fs').promises;
@@ -391,30 +414,22 @@ ipcMain.handle('stop-audio', async () => {
 
 ipcMain.handle('get-complete-audio-path', async (_, sessionId: string, track: 'mic' | 'sys' | 'mix' = 'mix') => {
   const fs = require('fs');
-  // Check both backend/recordings and recordings directories
-  const backendAudioDir = path.join(process.cwd(), 'backend', 'recordings', sessionId, 'audio');
-  const frontendAudioDir = path.join(process.cwd(), 'recordings', sessionId, 'audio');
+  // Use unified recordings directory
+  const unifiedRecordingsDir = getRecordingsDir();
+  const audioDir = path.join(unifiedRecordingsDir, sessionId, 'audio');
   
-  // Check which directory exists, or neither
-  let recordingsDir: string;
-  if (fs.existsSync(backendAudioDir)) {
-    recordingsDir = backendAudioDir;
-  } else if (fs.existsSync(frontendAudioDir)) {
-    recordingsDir = frontendAudioDir;
-  } else {
-    console.error(`Audio directory not found for session ${sessionId}`);
+  // Check if directory exists
+  if (!fs.existsSync(audioDir)) {
     // Create directory for new recordings
-    const newDir = path.join(process.cwd(), 'recordings', sessionId, 'audio');
-    fs.mkdirSync(newDir, { recursive: true });
+    fs.mkdirSync(audioDir, { recursive: true });
     return ''; // Return empty string if no audio files exist yet
   }
   
   try {
-    const files = fs.readdirSync(recordingsDir);
+    const files = fs.readdirSync(audioDir);
     
     // If no files, return empty string
     if (files.length === 0) {
-      console.log(`No audio files in ${recordingsDir} yet`);
       return '';
     }
     
@@ -422,21 +437,20 @@ ipcMain.handle('get-complete-audio-path', async (_, sessionId: string, track: 'm
     const completeFile = files.find((f: string) => f.includes('_full_') && f.includes(`_${track}.wav`));
     
     if (completeFile) {
-      const fullPath = path.join(recordingsDir, completeFile);
-      console.log(`Found complete ${track} audio file: ${completeFile}`);
+      const fullPath = path.join(audioDir, completeFile);
+      console.log(`Found audio file: ${track} track for session ${sessionId}`);
       return fullPath;
     }
     
     // Fallback to any audio file for the track
     const trackFile = files.find((f: string) => f.includes(`_${track}.`) && (f.endsWith('.wav') || f.endsWith('.mp3') || f.endsWith('.webm')));
     if (trackFile) {
-      return path.join(recordingsDir, trackFile);
+      return path.join(audioDir, trackFile);
     }
     
-    console.log(`No ${track} audio file found for session yet`);
     return ''; // Return empty string instead of throwing error
   } catch (error) {
-    console.error(`Error finding complete audio file: ${error}`);
+    console.error(`Error finding audio file: ${error}`);
     return ''; // Return empty string instead of throwing error
   }
 });
@@ -473,27 +487,30 @@ ipcMain.handle('play-audio-with-time-range', async (_, filePath: string, startTi
 
 ipcMain.handle('get-audio-path', async (_, sessionId: string, timestamp: number) => {
   const fs = require('fs');
-  // Check both backend/recordings and recordings directories
-  const backendAudioDir = path.join(process.cwd(), 'backend', 'recordings', sessionId, 'audio');
-  const frontendAudioDir = path.join(process.cwd(), 'recordings', sessionId, 'audio');
+  // Use unified recordings directory
+  const unifiedRecordingsDir = getRecordingsDir();
+  const audioDir = path.join(unifiedRecordingsDir, sessionId, 'audio');
   
-  // Prioritize backend directory, fall back to frontend directory
-  const recordingsDir = fs.existsSync(backendAudioDir) ? backendAudioDir : frontendAudioDir;
+  // Check if directory exists
+  if (!fs.existsSync(audioDir)) {
+    console.error(`Audio directory not found for session ${sessionId} at ${audioDir}`);
+    throw new Error('Audio directory not found');
+  }
   
   try {
     // First try exact match with new pattern
-    const files = fs.readdirSync(recordingsDir);
+    const files = fs.readdirSync(audioDir);
     const targetSuffix = `_${timestamp}.webm`;
     const exactMatch = files.find((f: string) => f.endsWith(targetSuffix));
     
     if (exactMatch) {
-      return path.join(recordingsDir, exactMatch);
+      return path.join(audioDir, exactMatch);
     }
     
     // Try legacy pattern
     const legacyFile = `${timestamp}.webm`;
     if (files.includes(legacyFile)) {
-      return path.join(recordingsDir, legacyFile);
+      return path.join(audioDir, legacyFile);
     }
     
     // Find closest audio file (support .webm, .wav, and .mp3)
@@ -523,7 +540,7 @@ ipcMain.handle('get-audio-path', async (_, sessionId: string, timestamp: number)
       .filter(Boolean) as { file: string; timestamp: number }[];
     
     if (audioFiles.length === 0) {
-      console.error(`No audio files found in ${recordingsDir}`);
+      console.error(`No audio files found in ${audioDir}`);
       throw new Error('No audio files found in recording');
     }
     
@@ -539,8 +556,11 @@ ipcMain.handle('get-audio-path', async (_, sessionId: string, timestamp: number)
       }
     }
     
-    console.log(`Using closest audio file: ${closest.file} for timestamp ${timestamp}`);
-    return path.join(recordingsDir, closest.file);
+    // Only log if significant time difference
+    if (minDiff > 1000) {
+      console.log(`Using closest audio file: ${closest.file} for timestamp ${timestamp} (diff: ${minDiff}ms)`);
+    }
+    return path.join(audioDir, closest.file);
     
   } catch (error) {
     console.error(`Error finding audio file: ${error}`);
@@ -565,7 +585,8 @@ ipcMain.handle('select-output-path', async () => {
 ipcMain.handle('save-markdown', async (_, sessionId: string, content: string) => {
   const fs = require('fs').promises;
   const pathMod = require('path');
-  const sessionDir = pathMod.join(process.cwd(), 'recordings', sessionId);
+  const unifiedRecordingsDir = getRecordingsDir();
+  const sessionDir = pathMod.join(unifiedRecordingsDir, sessionId);
   
   // Ensure the directory exists
   await fs.mkdir(sessionDir, { recursive: true });
@@ -585,23 +606,10 @@ ipcMain.handle('save-markdown', async (_, sessionId: string, content: string) =>
 
 ipcMain.handle('load-recording', async (_, sessionId: string) => {
   const fs = require('fs').promises;
-  // Check both backend/recordings and recordings directories
-  const backendRecordingsDir = path.join(process.cwd(), 'backend', 'recordings');
-  const frontendRecordingsDir = path.join(process.cwd(), 'recordings');
-  
-  // Try backend directory first, fall back to frontend directory
-  let recordingsDir = frontendRecordingsDir;
-  let sessionDir = path.join(frontendRecordingsDir, sessionId);
-  let metadataPath = path.join(sessionDir, 'metadata.json');
-  
-  try {
-    await fs.access(path.join(backendRecordingsDir, sessionId, 'metadata.json'));
-    recordingsDir = backendRecordingsDir;
-    sessionDir = path.join(backendRecordingsDir, sessionId);
-    metadataPath = path.join(sessionDir, 'metadata.json');
-  } catch {
-    // Backend directory doesn't exist or doesn't have this session, use frontend
-  }
+  // Use unified recordings directory
+  const recordingsDir = getRecordingsDir();
+  const sessionDir = path.join(recordingsDir, sessionId);
+  const metadataPath = path.join(sessionDir, 'metadata.json');
   
   try {
     // Check if recordings directory exists
@@ -677,12 +685,15 @@ ipcMain.handle('load-recording', async (_, sessionId: string) => {
 
 ipcMain.handle('get-screenshots-in-range', async (_, sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => {
   const fs = require('fs');
-  // Check both backend/recordings and recordings directories
-  const backendDir = path.join(process.cwd(), 'backend', 'recordings', sessionId, 'screenshots');
-  const frontendDir = path.join(process.cwd(), 'recordings', sessionId, 'screenshots');
+  // Use unified recordings directory
+  const unifiedRecordingsDir = getRecordingsDir();
+  const screenshotDir = path.join(unifiedRecordingsDir, sessionId, 'screenshots');
   
-  // Prioritize backend directory, fall back to frontend directory
-  let screenshotDir = fs.existsSync(backendDir) ? backendDir : frontendDir;
+  // Check if directory exists
+  if (!fs.existsSync(screenshotDir)) {
+    console.warn(`Screenshot directory not found for session ${sessionId} at ${screenshotDir}`);
+    return [];
+  }
   const suffix = type === 'full' ? '_full.png' : '_thumb.jpg';
   
   try {
@@ -722,12 +733,15 @@ ipcMain.handle('get-screenshots-in-range', async (_, sessionId: string, startTim
 
 ipcMain.handle('get-screenshot-path', async (_, sessionId: string, timestamp: number, type: 'full' | 'thumb') => {
   const fs = require('fs');
-  // Check both backend/recordings and recordings directories
-  const backendDir = path.join(process.cwd(), 'backend', 'recordings', sessionId, 'screenshots');
-  const frontendDir = path.join(process.cwd(), 'recordings', sessionId, 'screenshots');
+  // Use unified recordings directory
+  const unifiedRecordingsDir = getRecordingsDir();
+  const screenshotDir = path.join(unifiedRecordingsDir, sessionId, 'screenshots');
   
-  // Prioritize backend directory, fall back to frontend directory
-  let screenshotDir = fs.existsSync(backendDir) ? backendDir : frontendDir;
+  // Check if directory exists
+  if (!fs.existsSync(screenshotDir)) {
+    console.warn(`Screenshot directory not found for session ${sessionId} at ${screenshotDir}`);
+    return '';
+  }
   const suffix = type === 'full' ? '_full.png' : '_thumb.jpg';
   
   try {
@@ -785,11 +799,19 @@ ipcMain.handle('get-screenshot-path', async (_, sessionId: string, timestamp: nu
     }
     
     const closestPath = path.join(screenshotDir, closest.file);
-    console.log(`Using closest screenshot: ${closest.file} for timestamp ${timestamp}`);
+    // Only log if significant time difference
+    if (minDiff > 1000) {
+      console.log(`Using closest screenshot: ${closest.file} for timestamp ${timestamp} (diff: ${minDiff}ms)`);
+    }
     return closestPath;
     
   } catch (error) {
     console.error(`Error finding screenshot: ${error}`);
     return '';
   }
+});
+
+// Expose settings to renderer
+ipcMain.handle('get-recordings-dir', async () => {
+  return getRecordingsDir();
 });

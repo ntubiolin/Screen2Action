@@ -32,8 +32,10 @@ fi
 # Start backend in background
 echo "Starting Python backend..."
 cd backend
-source .venv/bin/activate
-python run.py &
+# Unset any conflicting VIRTUAL_ENV from parent project
+unset VIRTUAL_ENV
+# Use uv to run the backend with the correct environment
+uv run python run.py &
 BACKEND_PID=$!
 cd ..
 
