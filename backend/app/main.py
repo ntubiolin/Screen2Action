@@ -89,7 +89,8 @@ async def startup_event():
                 await electron_client.send_response(data['id'], {"success": True, "servers": servers})
             elif data.get('action') == 'activate_mcp_server':
                 server_name = data.get('payload', {}).get('server_name')
-                success = await mcp_service.activate_mcp_server(server_name)
+                session_id = data.get('payload', {}).get('session_id')
+                success = await mcp_service.activate_mcp_server(server_name, session_id)
                 await electron_client.send_response(data['id'], {"success": success})
             elif data.get('action') == 'deactivate_mcp_server':
                 await mcp_service.deactivate_mcp_server()
@@ -132,6 +133,48 @@ async def startup_event():
                 logger.info("Processing select_audio_devices action")
                 # This is handled by the frontend, just acknowledge
                 await electron_client.send_response(data['id'], {"success": True})
+            elif data.get('action') == 'send_mcp_message':
+                # Handle MCP message with selected tools
+                logger.info("Processing send_mcp_message action")
+                payload = data.get('payload', {})
+                message_text = payload.get('message')
+                context = payload.get('context', '')
+                tools = payload.get('tools', [])
+                session_id = payload.get('session_id')
+                
+                # If we have a session_id or file tools are requested, prepare the session-aware mcp-use client
+                if session_id or any('file' in tool or 'directory' in tool for tool in tools):
+                    mcp_service.prepare_session(session_id)
+                
+                # If we have a session_id and filesystem tools are requested, re-activate with session
+                if session_id and any('file' in tool or 'directory' in tool for tool in tools):
+                    # Re-activate filesystem server with session-specific directory
+                    await mcp_service.activate_mcp_server('filesystem', session_id)
+                
+                # Build task description with context
+                task_description = f"{message_text}\n\nContext:\n{context}"
+                
+                result = await mcp_service.run_intelligent_task(
+                    task_description,
+                    {"tools": tools, "context": context, "session_id": session_id}
+                )
+                
+                # Extract the response from the result
+                response_text = ""
+                if isinstance(result, dict):
+                    if "result" in result:
+                        response_text = str(result["result"])
+                    elif "error" in result:
+                        response_text = f"Error: {result['error']}"
+                    else:
+                        response_text = str(result)
+                else:
+                    response_text = str(result)
+                
+                await electron_client.send_response(data['id'], {
+                    "success": True, 
+                    "response": response_text
+                })
             elif data.get('action') == 'process_command':
                 # Handle AI commands
                 message = Message(**data)
@@ -263,7 +306,8 @@ async def process_message(message: Message) -> Message:
         
         elif message.action == "activate_mcp_server":
             server_name = message.payload.get("server_name")
-            success = await mcp_service.activate_mcp_server(server_name)
+            session_id = message.payload.get("session_id")
+            success = await mcp_service.activate_mcp_server(server_name, session_id)
             return Message(
                 id=message.id,
                 type=MessageType.RESPONSE,
@@ -344,6 +388,16 @@ async def process_message(message: Message) -> Message:
             message_text = message.payload.get("message")
             context = message.payload.get("context", "")
             tools = message.payload.get("tools", [])
+            session_id = message.payload.get("session_id")
+            
+            # Prepare session-aware mcp-use client when file tools or session present
+            if session_id or any('file' in tool or 'directory' in tool for tool in tools):
+                mcp_service.prepare_session(session_id)
+            
+            # If we have a session_id and filesystem tools are requested, re-activate with session
+            if session_id and any('file' in tool or 'directory' in tool for tool in tools):
+                # Re-activate filesystem server with session-specific directory
+                await mcp_service.activate_mcp_server('filesystem', session_id)
             
             # Build task description with context and tools
             task_description = f"{message_text}\n\nContext:\n{context}"
@@ -352,26 +406,13 @@ async def process_message(message: Message) -> Message:
             
             result = await mcp_service.run_intelligent_task(
                 task_description,
-                {"tools": tools, "context": context}
+                {"tools": tools, "context": context, "session_id": session_id}
             )
-            
-            # Extract the response from the result
-            response_text = ""
-            if isinstance(result, dict):
-                if "result" in result:
-                    response_text = str(result["result"])
-                elif "error" in result:
-                    response_text = f"Error: {result['error']}"
-                else:
-                    response_text = str(result)
-            else:
-                response_text = str(result)
-            
             return Message(
                 id=message.id,
                 type=MessageType.RESPONSE,
                 action=message.action,
-                payload={"success": True, "response": response_text}
+                payload={"success": True, "response": str(result.get("result", result))}
             )
             
         elif message.action == "list_audio_devices":
