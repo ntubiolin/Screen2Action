@@ -2,7 +2,7 @@ import { desktopCapturer, BrowserWindow } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { getRecordingsDir } from './config';
+import { getRecordingsDir } from '@main/config';
 
 export class RecordingManager {
   private floatingWindow: BrowserWindow | null = null;
@@ -11,32 +11,17 @@ export class RecordingManager {
     this.floatingWindow = window;
   }
 
+  // No-op: with content protection enabled on the floating window,
+  // we no longer need to hide it before screenshots.
   private async hideFloatingWindow(): Promise<void> {
-    if (this.floatingWindow && !this.floatingWindow.isDestroyed() && this.floatingWindow.isVisible()) {
-      console.log('Hiding floating window for screenshot');
-      this.floatingWindow.hide();
-      // Wait a bit for the window to fully hide
-      await new Promise(resolve => setTimeout(resolve, 50));
-    } else {
-      console.log('Floating window not visible or destroyed, skipping hide');
-    }
+    // ...existing code...
+    return;
   }
 
+  // No-op: avoid showing/focusing/forcing always-on-top to prevent flicker.
   private async showFloatingWindow(): Promise<void> {
-    if (this.floatingWindow && !this.floatingWindow.isDestroyed()) {
-      // First show the window
-      this.floatingWindow.show();
-      // Ensure the window is on top with the correct level
-      this.floatingWindow.setAlwaysOnTop(true, 'floating');
-      // Bring window to front
-      this.floatingWindow.moveTop();
-      // Focus the window
-      this.floatingWindow.focus();
-      // Log for debugging
-      console.log('Floating window restored after screenshot');
-    } else {
-      console.warn('Floating window is not available or destroyed');
-    }
+    // ...existing code...
+    return;
   }
 
   private isRecording = false;
@@ -91,9 +76,7 @@ export class RecordingManager {
 
     // Take a final screenshot before stopping (best-effort)
     try {
-      // Hide floating window before taking final screenshot
-      await this.hideFloatingWindow();
-      
+      // No need to hide floating window due to content protection
       const sources = await desktopCapturer.getSources({
         types: ['screen'],
         thumbnailSize: { width: 1920, height: 1080 },
@@ -117,13 +100,9 @@ export class RecordingManager {
         try { fs.writeFileSync(fullPath, screenshot.toPNG()); } catch {}
         try { fs.writeFileSync(thumbPath, screenshot.resize({ width: 320, height: 180 }).toJPEG(80)); } catch {}
       }
-      
-      // Show floating window again after final screenshot
-      await this.showFloatingWindow();
+      // No need to restore/show floating window
     } catch (e) {
       console.warn('Final screenshot capture failed:', e);
-      // Make sure to show the window again even if there's an error
-      await this.showFloatingWindow();
     }
 
     this.isRecording = false;
@@ -155,9 +134,7 @@ export class RecordingManager {
       if (!this.isRecording) return;
       
       try {
-        // Hide floating window before taking screenshot
-        await this.hideFloatingWindow();
-        
+        // No need to hide floating window due to content protection
         const sources = await desktopCapturer.getSources({
           types: ['screen'],
           thumbnailSize: { width: 1920, height: 1080 },
@@ -192,12 +169,9 @@ export class RecordingManager {
           fs.writeFileSync(thumbPath, thumb.toJPEG(80));
         }
         
-        // Show floating window again after screenshot
-        await this.showFloatingWindow();
+        // No need to show floating window
       } catch (error) {
         console.error('Screenshot capture error:', error);
-        // Make sure to show the window again even if there's an error
-        await this.showFloatingWindow();
       }
     }, 10000); // 10 seconds
   }

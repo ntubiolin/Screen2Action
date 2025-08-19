@@ -83,6 +83,10 @@ function createFloatingWindow() {
     },
   });
 
+  // Exclude floating window content from OS-level screen capture/recording
+  // This avoids the need to hide/show the window during periodic screenshots
+  floatingWindow.setContentProtection(true);
+
   if (process.env.NODE_ENV === 'development') {
     floatingWindow.loadURL('http://localhost:3000#/floating');
   } else {
