@@ -10,7 +10,8 @@ import {
   Check,
   ChevronRight,
   ChevronLeft,
-  Maximize2
+  Maximize2,
+  Download
 } from 'lucide-react';
 
 interface ReviewPageSidebarProps {
@@ -550,6 +551,27 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  const handleExportMarkdown = async () => {
+    try {
+      // Create a blob with the markdown content
+      const blob = new Blob([markdownContent], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create a download link and click it
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `session_${sessionId}_notes.md`;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to export markdown:', error);
+    }
+  };
+
   // Handle resize
   useEffect(() => {
     if (!resizeRef.current) return;
@@ -660,20 +682,30 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
         <div className="w-96 bg-gray-800 border-l border-gray-700 flex flex-col">
           {/* Sidebar Header */}
           <div className="p-4 border-b border-gray-700">
-            <h2 className="text-lg font-semibold text-white">
-              {currentParagraph ? (
-                <>
-                  Paragraph at Line {currentParagraph.lineNumber}
-                  {currentParagraph.timestamp > 0 && (
-                    <span className="text-sm text-gray-400 ml-2">
-                      [{formatTimestamp(currentParagraph.timestamp)}]
-                    </span>
-                  )}
-                </>
-              ) : (
-                'No paragraph selected'
-              )}
-            </h2>
+            <div className="flex justify-between items-start">
+              <h2 className="text-lg font-semibold text-white">
+                {currentParagraph ? (
+                  <>
+                    Paragraph at Line {currentParagraph.lineNumber}
+                    {currentParagraph.timestamp > 0 && (
+                      <span className="text-sm text-gray-400 ml-2">
+                        [{formatTimestamp(currentParagraph.timestamp)}]
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  'No paragraph selected'
+                )}
+              </h2>
+              <button
+                onClick={handleExportMarkdown}
+                className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors"
+                title="Export markdown"
+              >
+                <Download size={14} />
+                <span>Export</span>
+              </button>
+            </div>
           </div>
 
           {currentParagraph && (
