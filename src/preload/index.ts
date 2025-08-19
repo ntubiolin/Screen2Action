@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  platform: process.platform,
   recording: {
     start: (screenId: string) => ipcRenderer.invoke('start-recording', screenId),
     stop: () => ipcRenderer.invoke('stop-recording'),
@@ -40,6 +41,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getScreenshotsInRange: (sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => ipcRenderer.invoke('get-screenshots-in-range', sessionId, startTime, endTime, type),
   },
   
+  window: {
+    openFloatingWindow: () => ipcRenderer.invoke('open-floating-window'),
+    closeFloatingWindow: () => ipcRenderer.invoke('close-floating-window'),
+    expandToMainWindow: (sessionId?: string, notes?: string) => ipcRenderer.invoke('expand-to-main-window', sessionId, notes),
+  },
+  
   // Event listeners
   on: (channel: string, callback: Function) => {
     const validChannels = [
@@ -48,6 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'ai-response',
       'error',
       'audio-conversion-complete',
+      'expanded-from-floating',
     ];
     
     if (validChannels.includes(channel)) {
@@ -62,6 +70,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 // Type definitions for TypeScript
 export interface ElectronAPI {
+  platform: NodeJS.Platform;
   recording: {
     start: (screenId: string) => Promise<string>;
     stop: () => Promise<{ duration: number; sessionId: string | null }>;
@@ -92,6 +101,11 @@ export interface ElectronAPI {
     loadRecording: (sessionId: string) => Promise<any>;
     getScreenshotPath: (sessionId: string, timestamp: number, type: 'full' | 'thumb') => Promise<string>;
     getScreenshotsInRange: (sessionId: string, startTime: number, endTime: number, type: 'full' | 'thumb') => Promise<Array<{path: string; timestamp: number}>>;
+  };
+  window: {
+    openFloatingWindow: () => Promise<boolean>;
+    closeFloatingWindow: () => Promise<boolean>;
+    expandToMainWindow: (sessionId?: string, notes?: string) => Promise<boolean>;
   };
   on: (channel: string, callback: Function) => void;
   removeListener: (channel: string, callback: Function) => void;

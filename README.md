@@ -4,11 +4,30 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 
 ## Features
 
+### 🪟 Floating Window for Recording
+- **Mini floating window** (300x200px) for unobtrusive recording
+- Always-on-top transparent window with draggable interface
+- Built-in Monaco Editor for real-time markdown note-taking
+- Recording controls with timer display
+- Settings popover for output path and audio configuration
+- One-click expand to full review window
+
 ### 🎥 Meeting Recording + Content-Aligned Playback
 - Synchronized screen, audio, and note recording
-- Automatic periodic screenshots (every 10 seconds)
-- Three-column review interface (note rendering, media timeline, AI assistant)
-- Audio track recording support (microphone/system sound) - in development
+- Automatic periodic screenshots (configurable: 10/30/60 seconds)
+- Enhanced review interface with Monaco Editor hover tooltips
+- Interactive screenshot preview on text hover
+- Double-click to insert screenshots into notes
+- Audio track recording support (microphone/system sound)
+
+### 📝 Review Page Widget System
+- **Interactive widgets** above each H1 header in markdown notes
+- **Screenshot gallery** with multi-select capability for each section
+- **Quick actions** per section:
+  - Insert selected screenshots directly into notes
+  - Start AI chat with section context
+  - Play 15 seconds of audio from section timestamp
+- **MCP integration** for enhanced AI capabilities in section-specific chat
 
 ### 📸 Smart Screenshots + Command Operations
 - Hotkey screenshots (⌘+Shift+S)
@@ -19,7 +38,7 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 
 ### 📁 File Management
 - Custom output path selection for recordings
-- Automatic markdown notes storage
+- Automatic markdown notes storage with timestamps
 - Improved error handling for missing recordings
 - Screenshot rendering in review interface
 
@@ -145,6 +164,55 @@ Screen2Action/
 ```
 
 ## Development Guide
+
+### Quick Testing the Review Page
+
+For rapid development and testing of the Review Page without going through the recording process:
+
+#### Method 1: All-in-One Script (Recommended)
+```bash
+npm run test:review:full
+# Or with custom session ID:
+./test-review-full.sh YOUR_SESSION_ID
+```
+This script will:
+- Check and start the Python backend if needed
+- Start the frontend dev server
+- Open the Review Page in your browser
+- Handle cleanup when you press Ctrl+C
+
+#### Method 2: Manual Setup
+**Prerequisites: The Python backend server must be running!**
+
+```bash
+# Terminal 1 - Start the backend server:
+cd backend
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python run.py
+
+# Terminal 2 - Start frontend and open browser:
+npm run test:review
+```
+This will start the dev server and open the Review Page with the default test session after a 2-second delay.
+
+#### Method 3: Other Options
+
+**Shell Script with Custom Session ID:**
+```bash
+./test-review.sh [sessionId]
+```
+
+**HTML Test Launcher:**
+1. Ensure backend is running
+2. Start dev server: `npm run dev:renderer`
+3. Open `test-review.html` in browser
+
+**Direct URL:**
+1. Ensure backend is running
+2. Start dev server: `npm run dev:renderer`
+3. Open: `http://localhost:3000?testMode=review&sessionId=YOUR_SESSION_ID`
+
+This bypasses the need to start from floating window, record audio, and complete a full recording session.
 
 ### Build Production Version
 
