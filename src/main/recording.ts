@@ -2,8 +2,43 @@ import { desktopCapturer, BrowserWindow } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { getRecordingsDir } from './config';
 
 export class RecordingManager {
+  private floatingWindow: BrowserWindow | null = null;
+
+  setFloatingWindow(window: BrowserWindow | null) {
+    this.floatingWindow = window;
+  }
+
+  private async hideFloatingWindow(): Promise<void> {
+    if (this.floatingWindow && !this.floatingWindow.isDestroyed() && this.floatingWindow.isVisible()) {
+      console.log('Hiding floating window for screenshot');
+      this.floatingWindow.hide();
+      // Wait a bit for the window to fully hide
+      await new Promise(resolve => setTimeout(resolve, 50));
+    } else {
+      console.log('Floating window not visible or destroyed, skipping hide');
+    }
+  }
+
+  private async showFloatingWindow(): Promise<void> {
+    if (this.floatingWindow && !this.floatingWindow.isDestroyed()) {
+      // First show the window
+      this.floatingWindow.show();
+      // Ensure the window is on top with the correct level
+      this.floatingWindow.setAlwaysOnTop(true, 'floating');
+      // Bring window to front
+      this.floatingWindow.moveTop();
+      // Focus the window
+      this.floatingWindow.focus();
+      // Log for debugging
+      console.log('Floating window restored after screenshot');
+    } else {
+      console.warn('Floating window is not available or destroyed');
+    }
+  }
+
   private isRecording = false;
   private sessionId: string | null = null;
   private screenshotInterval: NodeJS.Timeout | null = null;
@@ -19,16 +54,16 @@ export class RecordingManager {
     this.startTime = Date.now();
     this.isRecording = true;
     
-    // Create session directory
-    const recordingsDir = path.join(process.cwd(), 'recordings');
+    // Create session directory using unified recordings dir
+    const recordingsDir = getRecordingsDir();
     this.sessionPath = path.join(recordingsDir, this.sessionId);
     
     if (!fs.existsSync(recordingsDir)) {
       fs.mkdirSync(recordingsDir, { recursive: true });
     }
-    fs.mkdirSync(this.sessionPath);
-    fs.mkdirSync(path.join(this.sessionPath, 'screenshots'));
-    fs.mkdirSync(path.join(this.sessionPath, 'audio'));
+    fs.mkdirSync(this.sessionPath, { recursive: true });
+    fs.mkdirSync(path.join(this.sessionPath, 'screenshots'), { recursive: true });
+    fs.mkdirSync(path.join(this.sessionPath, 'audio'), { recursive: true });
     
     // Initialize metadata
     const metadata = {
@@ -56,6 +91,9 @@ export class RecordingManager {
 
     // Take a final screenshot before stopping (best-effort)
     try {
+      // Hide floating window before taking final screenshot
+      await this.hideFloatingWindow();
+      
       const sources = await desktopCapturer.getSources({
         types: ['screen'],
         thumbnailSize: { width: 1920, height: 1080 },
@@ -79,8 +117,13 @@ export class RecordingManager {
         try { fs.writeFileSync(fullPath, screenshot.toPNG()); } catch {}
         try { fs.writeFileSync(thumbPath, screenshot.resize({ width: 320, height: 180 }).toJPEG(80)); } catch {}
       }
+      
+      // Show floating window again after final screenshot
+      await this.showFloatingWindow();
     } catch (e) {
       console.warn('Final screenshot capture failed:', e);
+      // Make sure to show the window again even if there's an error
+      await this.showFloatingWindow();
     }
 
     this.isRecording = false;
@@ -112,6 +155,9 @@ export class RecordingManager {
       if (!this.isRecording) return;
       
       try {
+        // Hide floating window before taking screenshot
+        await this.hideFloatingWindow();
+        
         const sources = await desktopCapturer.getSources({
           types: ['screen'],
           thumbnailSize: { width: 1920, height: 1080 },
@@ -145,8 +191,13 @@ export class RecordingManager {
           
           fs.writeFileSync(thumbPath, thumb.toJPEG(80));
         }
+        
+        // Show floating window again after screenshot
+        await this.showFloatingWindow();
       } catch (error) {
         console.error('Screenshot capture error:', error);
+        // Make sure to show the window again even if there's an error
+        await this.showFloatingWindow();
       }
     }, 10000); // 10 seconds
   }
