@@ -67,6 +67,8 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [rootTop, setRootTop] = useState(0);
   const { notes: storeNotes } = useRecordingStore();
 
   useEffect(() => {
@@ -74,6 +76,24 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     loadAudioPath();
     loadMcpServers();
   }, [sessionId]);
+
+  // Measure top offset so the fixed sidebar aligns with the screen's right edge but starts below the page header
+  useEffect(() => {
+    const measure = () => {
+      if (rootRef.current) {
+        const rect = rootRef.current.getBoundingClientRect();
+        setRootTop(Math.max(0, Math.floor(rect.top)));
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    // If layout might shift after fonts/Monaco load
+    const t = setTimeout(measure, 100);
+    return () => {
+      window.removeEventListener('resize', measure);
+      clearTimeout(t);
+    };
+  }, []);
 
   // Load markdown file
   const loadMarkdownFile = async () => {
@@ -616,7 +636,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   }, [upperSectionHeight]);
 
   return (
-    <div className="h-full flex bg-gray-900">
+    <div ref={rootRef} className="h-full flex bg-gray-900 relative">
       <style>{`
         .current-paragraph-highlight {
           background-color: rgba(59, 130, 246, 0.1);
@@ -632,7 +652,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
       `}</style>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Header */}
         <div className="bg-gray-800 p-4 border-b border-gray-700">
           <div className="flex justify-between items-center">
@@ -640,13 +660,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
               <h1 className="text-xl font-semibold text-white">Review Session</h1>
               <p className="text-sm text-gray-400 mt-1">Session ID: {sessionId}</p>
             </div>
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="text-gray-400 hover:text-white p-2 rounded hover:bg-gray-700 transition-colors"
-              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            >
-              {sidebarOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-            </button>
+            {/* Toggle button moved to a floating control to ensure visibility */}
           </div>
         </div>
 
@@ -677,289 +691,308 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
         </div>
       </div>
 
+      {/* Floating single toggle button (always visible) */}
+      <div
+        className="fixed z-40"
+        style={{ top: rootTop + 8, right: 12 }}
+      >
+        <button
+          onClick={() => setSidebarOpen(prev => !prev)}
+          className="text-gray-200 bg-gray-800/90 hover:bg-gray-700 border border-gray-700 rounded p-2 shadow-md transition-colors"
+          title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+        >
+          {sidebarOpen ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+        </button>
+      </div>
+
       {/* Sidebar */}
-      {sidebarOpen && (
-        <div className="w-96 bg-gray-800 border-l border-gray-700 flex flex-col">
-          {/* Sidebar Header */}
-          <div className="p-4 border-b border-gray-700">
-            <div className="flex justify-between items-start">
-              <h2 className="text-lg font-semibold text-white">
-                {currentParagraph ? (
-                  <>
-                    Paragraph at Line {currentParagraph.lineNumber}
-                    {currentParagraph.timestamp > 0 && (
-                      <span className="text-sm text-gray-400 ml-2">
-                        [{formatTimestamp(currentParagraph.timestamp)}]
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  'No paragraph selected'
-                )}
-              </h2>
-              <button
-                onClick={handleExportMarkdown}
-                className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors"
-                title="Export markdown"
-              >
-                <Download size={14} />
-                <span>Export</span>
-              </button>
-            </div>
-          </div>
-
-          {currentParagraph && (
-            <>
-              {/* Upper Section - Screenshots and Audio Controls */}
-              <div 
-                className="flex flex-col"
-                style={{ height: `${upperSectionHeight}%` }}
-              >
-                {/* Time Range Display */}
-                <div className="px-4 py-2 bg-gray-900 text-sm text-gray-400">
-                  Time range: {formatTimestamp(currentParagraph.timestamp)} - {
-                    (() => {
-                      const next = parsedNotes.find(n => n.timestamp > currentParagraph.timestamp);
-                      return next ? formatTimestamp(next.timestamp) : 'End';
-                    })()
-                  }
-                </div>
-
-                {/* Screenshots Gallery */}
-                <div className="flex-1 overflow-y-auto p-4">
-                  {loadingScreenshots ? (
-                    <div className="text-center text-gray-400 py-8">Loading screenshots...</div>
-                  ) : screenshots.length > 0 ? (
-                    <div className="space-y-4">
-                      <div className="text-sm text-gray-400">
-                        Click to select, double-click to preview:
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {screenshots.map((screenshot, index) => (
-                          <div
-                            key={index}
-                            className="relative cursor-pointer group"
-                            onClick={() => toggleScreenshotSelection(index)}
-                            onDoubleClick={() => setPreviewScreenshot(screenshot.path)}
-                          >
-                            <img
-                              src={`file://${screenshot.path}`}
-                              alt={`Screenshot at ${formatTimestamp(screenshot.timestamp)}`}
-                              className={`w-full h-20 object-cover rounded border-2 transition-all ${
-                                selectedScreenshots.has(index)
-                                  ? 'border-blue-500 ring-2 ring-blue-400'
-                                  : 'border-gray-600 hover:border-gray-500'
-                              }`}
-                            />
-                            {selectedScreenshots.has(index) && (
-                              <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-0.5">
-                                <Check size={12} className="text-white" />
-                              </div>
-                            )}
-                            <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 text-center">
-                              {formatTimestamp(screenshot.timestamp - currentParagraph.timestamp)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+      <div
+        className="fixed right-0 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden transition-all duration-200 ease-out z-30"
+        style={{ top: rootTop, height: `calc(100vh - ${rootTop}px)`, width: sidebarOpen ? '24rem' : '0px', willChange: 'width' }}
+      >
+        {sidebarOpen && (
+          <>
+            {/* Sidebar Header */}
+            <div className="p-4 border-b border-gray-700">
+              <div className="flex justify-between items-start">
+                <h2 className="text-lg font-semibold text-white">
+                  {currentParagraph ? (
+                    <>
+                      Paragraph at Line {currentParagraph.lineNumber}
+                      {currentParagraph.timestamp > 0 && (
+                        <span className="text-sm text-gray-400 ml-2">
+                          [{formatTimestamp(currentParagraph.timestamp)}]
+                        </span>
+                      )}
+                    </>
                   ) : (
-                    <div className="text-center text-gray-500 py-8">
-                      No screenshots available for this section
-                    </div>
+                    'No paragraph selected'
                   )}
-                </div>
-
-                {/* Action Buttons */}
-                <div className="p-4 border-t border-gray-700 space-y-2">
-                  <button
-                    onClick={handleInsertScreenshot}
-                    disabled={selectedScreenshots.size === 0}
-                    className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
-                      selectedScreenshots.size > 0
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                    }`}
-                  >
-                    <Camera size={16} />
-                    <span>Insert {selectedScreenshots.size || ''} Screenshot{selectedScreenshots.size !== 1 ? 's' : ''}</span>
-                  </button>
-
-                  {/* Audio Controls */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handlePlayAudio}
-                      disabled={!audioPath || !currentParagraph}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
-                        audioPath && currentParagraph
-                          ? 'bg-green-600 hover:bg-green-700 text-white'
-                          : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      <Play size={16} />
-                      <span>{isPlaying ? `${formatTimestamp(currentTime)}` : 'Play'}</span>
-                    </button>
-                    <button
-                      onClick={handlePauseAudio}
-                      disabled={!isPlaying}
-                      className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
-                        isPlaying
-                          ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                          : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      <Pause size={16} />
-                    </button>
-                    <button
-                      onClick={handleStopAudio}
-                      disabled={!isPlaying && currentTime === 0}
-                      className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
-                        isPlaying || currentTime > 0
-                          ? 'bg-red-600 hover:bg-red-700 text-white'
-                          : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      <Square size={16} />
-                    </button>
-                  </div>
-                </div>
+                </h2>
+                <button
+                  onClick={handleExportMarkdown}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors"
+                  title="Export markdown"
+                >
+                  <Download size={14} />
+                  <span>Export</span>
+                </button>
               </div>
+            </div>
 
-              {/* Resize Bar */}
-              <div
-                ref={resizeRef}
-                className="h-1 bg-gray-700 hover:bg-gray-600 cursor-ns-resize transition-colors"
-              />
+            {currentParagraph && (
+              <>
+                {/* Upper Section - Screenshots and Audio Controls */}
+                <div 
+                  className="flex flex-col"
+                  style={{ height: `${upperSectionHeight}%` }}
+                >
+                  {/* Time Range Display */}
+                  <div className="px-4 py-2 bg-gray-900 text-sm text-gray-400">
+                    Time range: {formatTimestamp(currentParagraph.timestamp)} - {
+                      (() => {
+                        const next = parsedNotes.find(n => n.timestamp > currentParagraph.timestamp);
+                        return next ? formatTimestamp(next.timestamp) : 'End';
+                      })()
+                    }
+                  </div>
 
-              {/* Lower Section - MCP Settings and LLM Chat */}
-              <div 
-                className="flex flex-col"
-                style={{ height: `${100 - upperSectionHeight}%` }}
-              >
-                {/* MCP Settings */}
-                <div className="p-4 border-b border-gray-700">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1">MCP Server</label>
-                      <select
-                        value={selectedMcpServer}
-                        onChange={(e) => setSelectedMcpServer(e.target.value)}
-                        className="w-full bg-gray-700 text-white px-3 py-1.5 rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
-                      >
-                        <option value="">Standard AI (No MCP)</option>
-                        {mcpServers.map((server: any) => (
-                          <option key={server.name} value={server.name}>
-                            {server.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {selectedMcpServer && mcpTools.length > 0 && (
-                      <div>
-                        <label className="block text-sm text-gray-400 mb-1">
-                          Available Functions ({mcpTools.filter(t => selectedMcpTools.has(t.name)).length}/{mcpTools.length} selected)
-                        </label>
-                        <div className="max-h-24 overflow-y-auto bg-gray-900 rounded p-2 space-y-1">
-                          {mcpTools.map((tool: any) => (
-                            <label key={tool.name} className="flex items-center text-sm text-gray-300 cursor-pointer hover:text-white">
-                              <input
-                                type="checkbox"
-                                checked={selectedMcpTools.has(tool.name)}
-                                onChange={(e) => {
-                                  const newSelected = new Set(selectedMcpTools);
-                                  if (e.target.checked) {
-                                    newSelected.add(tool.name);
-                                  } else {
-                                    newSelected.delete(tool.name);
-                                  }
-                                  setSelectedMcpTools(newSelected);
-                                }}
-                                className="mr-2"
+                  {/* Screenshots Gallery */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {loadingScreenshots ? (
+                      <div className="text-center text-gray-400 py-8">Loading screenshots...</div>
+                    ) : screenshots.length > 0 ? (
+                      <div className="space-y-4">
+                        <div className="text-sm text-gray-400">
+                          Click to select, double-click to preview:
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {screenshots.map((screenshot, index) => (
+                            <div
+                              key={index}
+                              className="relative cursor-pointer group"
+                              onClick={() => toggleScreenshotSelection(index)}
+                              onDoubleClick={() => setPreviewScreenshot(screenshot.path)}
+                            >
+                              <img
+                                src={`file://${screenshot.path}`}
+                                alt={`Screenshot at ${formatTimestamp(screenshot.timestamp)}`}
+                                className={`w-full h-20 object-cover rounded border-2 transition-all ${
+                                  selectedScreenshots.has(index)
+                                    ? 'border-blue-500 ring-2 ring-blue-400'
+                                    : 'border-gray-600 hover:border-gray-500'
+                                }`}
                               />
-                              {tool.name}
-                            </label>
+                              {selectedScreenshots.has(index) && (
+                                <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-0.5">
+                                  <Check size={12} className="text-white" />
+                                </div>
+                              )}
+                              <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 text-center">
+                                {formatTimestamp(screenshot.timestamp - currentParagraph.timestamp)}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       </div>
+                    ) : (
+                      <div className="text-center text-gray-500 py-8">
+                        No screenshots available for this section
+                      </div>
                     )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="p-4 border-t border-gray-700 space-y-2">
+                    <button
+                      onClick={handleInsertScreenshot}
+                      disabled={selectedScreenshots.size === 0}
+                      className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                        selectedScreenshots.size > 0
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                          : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      <Camera size={16} />
+                      <span>Insert {selectedScreenshots.size || ''} Screenshot{selectedScreenshots.size !== 1 ? 's' : ''}</span>
+                    </button>
+
+                    {/* Audio Controls */}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handlePlayAudio}
+                        disabled={!audioPath || !currentParagraph}
+                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                          audioPath && currentParagraph
+                            ? 'bg-green-600 hover:bg-green-700 text-white'
+                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <Play size={16} />
+                        <span>{isPlaying ? `${formatTimestamp(currentTime)}` : 'Play'}</span>
+                      </button>
+                      <button
+                        onClick={handlePauseAudio}
+                        disabled={!isPlaying}
+                        className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                          isPlaying
+                            ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <Pause size={16} />
+                      </button>
+                      <button
+                        onClick={handleStopAudio}
+                        disabled={!isPlaying && currentTime === 0}
+                        className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                          isPlaying || currentTime > 0
+                            ? 'bg-red-600 hover:bg-red-700 text-white'
+                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <Square size={16} />
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Chat History */}
-                <div className="flex-1 overflow-y-auto p-4">
-                  {chatHistory.length > 0 ? (
+                {/* Resize Bar */}
+                <div
+                  ref={resizeRef}
+                  className="h-1 bg-gray-700 hover:bg-gray-600 cursor-ns-resize transition-colors"
+                />
+
+                {/* Lower Section - MCP Settings and LLM Chat */}
+                <div 
+                  className="flex flex-col"
+                  style={{ height: `${100 - upperSectionHeight}%` }}
+                >
+                  {/* MCP Settings */}
+                  <div className="p-4 border-b border-gray-700">
                     <div className="space-y-3">
-                      {chatHistory.map((msg, index) => (
-                        <div key={index} className={`${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                          <div className={`inline-block max-w-[80%] p-3 rounded-lg ${
-                            msg.role === 'user' 
-                              ? 'bg-blue-600 text-white' 
-                              : 'bg-gray-700 text-gray-100'
-                          }`}>
-                            <div className="text-xs opacity-75 mb-1">
-                              {msg.role === 'user' ? 'You' : 'AI'}
-                            </div>
-                            <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
-                          </div>
-                        </div>
-                      ))}
-                      {isProcessing && (
-                        <div className="text-left">
-                          <div className="inline-block bg-gray-700 text-gray-100 p-3 rounded-lg">
-                            <div className="text-sm">Processing...</div>
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-1">MCP Server</label>
+                        <select
+                          value={selectedMcpServer}
+                          onChange={(e) => setSelectedMcpServer(e.target.value)}
+                          className="w-full bg-gray-700 text-white px-3 py-1.5 rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
+                        >
+                          <option value="">Standard AI (No MCP)</option>
+                          {mcpServers.map((server: any) => (
+                            <option key={server.name} value={server.name}>
+                              {server.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {selectedMcpServer && mcpTools.length > 0 && (
+                        <div>
+                          <label className="block text-sm text-gray-400 mb-1">
+                            Available Functions ({mcpTools.filter(t => selectedMcpTools.has(t.name)).length}/{mcpTools.length} selected)
+                          </label>
+                          <div className="max-h-24 overflow-y-auto bg-gray-900 rounded p-2 space-y-1">
+                            {mcpTools.map((tool: any) => (
+                              <label key={tool.name} className="flex items-center text-sm text-gray-300 cursor-pointer hover:text-white">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedMcpTools.has(tool.name)}
+                                  onChange={(e) => {
+                                    const newSelected = new Set(selectedMcpTools);
+                                    if (e.target.checked) {
+                                      newSelected.add(tool.name);
+                                    } else {
+                                      newSelected.delete(tool.name);
+                                    }
+                                    setSelectedMcpTools(newSelected);
+                                  }}
+                                  className="mr-2"
+                                />
+                                {tool.name}
+                              </label>
+                            ))}
                           </div>
                         </div>
                       )}
                     </div>
-                  ) : (
-                    <div className="text-center text-gray-500 py-8">
-                      Start a conversation about this paragraph
-                    </div>
-                  )}
-                </div>
-
-                {/* Input Area */}
-                <div className="p-4 border-t border-gray-700">
-                  <div className="flex gap-2">
-                    <textarea
-                      value={aiPrompt}
-                      onChange={(e) => setAiPrompt(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendToAI();
-                        }
-                      }}
-                      placeholder="Ask about this paragraph..."
-                      className="flex-1 bg-gray-700 text-white px-3 py-2 rounded border border-gray-600 focus:border-blue-500 focus:outline-none resize-none text-sm"
-                      rows={2}
-                      disabled={isProcessing || !currentParagraph}
-                    />
                   </div>
-                  <button
-                    onClick={handleSendToAI}
-                    disabled={isProcessing || !aiPrompt.trim() || !currentParagraph}
-                    className={`mt-2 w-full px-4 py-2 rounded font-medium transition-colors text-sm ${
-                      isProcessing || !aiPrompt.trim() || !currentParagraph
-                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
-                  >
-                    {isProcessing ? 'Processing...' : 'Send'}
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
 
-          {!currentParagraph && (
-            <div className="flex-1 flex items-center justify-center text-gray-500">
-              Move cursor to a paragraph to view details
-            </div>
-          )}
-        </div>
-      )}
+                  {/* Chat History */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {chatHistory.length > 0 ? (
+                      <div className="space-y-3">
+                        {chatHistory.map((msg, index) => (
+                          <div key={index} className={`${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                            <div className={`inline-block max-w-[80%] p-3 rounded-lg ${
+                              msg.role === 'user' 
+                                ? 'bg-blue-600 text-white' 
+                                : 'bg-gray-700 text-gray-100'
+                            }`}>
+                              <div className="text-xs opacity-75 mb-1">
+                                {msg.role === 'user' ? 'You' : 'AI'}
+                              </div>
+                              <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
+                            </div>
+                          </div>
+                        ))}
+                        {isProcessing && (
+                          <div className="text-left">
+                            <div className="inline-block bg-gray-700 text-gray-100 p-3 rounded-lg">
+                              <div className="text-sm">Processing...</div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center text-gray-500 py-8">
+                        Start a conversation about this paragraph
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Input Area */}
+                  <div className="p-4 border-t border-gray-700">
+                    <div className="flex gap-2">
+                      <textarea
+                        value={aiPrompt}
+                        onChange={(e) => setAiPrompt(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendToAI();
+                          }
+                        }}
+                        placeholder="Ask about this paragraph..."
+                        className="flex-1 bg-gray-700 text-white px-3 py-2 rounded border border-gray-600 focus:border-blue-500 focus:outline-none resize-none text-sm"
+                        rows={2}
+                        disabled={isProcessing || !currentParagraph}
+                      />
+                    </div>
+                    <button
+                      onClick={handleSendToAI}
+                      disabled={isProcessing || !aiPrompt.trim() || !currentParagraph}
+                      className={`mt-2 w-full px-4 py-2 rounded font-medium transition-colors text-sm ${
+                        isProcessing || !aiPrompt.trim() || !currentParagraph
+                          ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                          : 'bg-blue-600 hover:bg-blue-700 text-white'
+                      }`}
+                    >
+                      {isProcessing ? 'Processing...' : 'Send'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {!currentParagraph && (
+              <div className="flex-1 flex items-center justify-center text-gray-500">
+                Move cursor to a paragraph to view details
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Screenshot Preview Modal */}
       {previewScreenshot && (
