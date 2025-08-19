@@ -16,6 +16,8 @@ const MultiScreenshotDisplay: React.FC<MultiScreenshotDisplayProps> = ({ session
   const [screenshots, setScreenshots] = useState<Array<{path: string; timestamp: number}>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [fullSizeImage, setFullSizeImage] = useState<string | null>(null);
+  const [fullSizeLoading, setFullSizeLoading] = useState(false);
 
   React.useEffect(() => {
     const loadScreenshots = async () => {
@@ -32,6 +34,41 @@ const MultiScreenshotDisplay: React.FC<MultiScreenshotDisplayProps> = ({ session
 
     loadScreenshots();
   }, [sessionId, startTime, endTime]);
+
+  const handleImageDoubleClick = async (screenshot: {path: string; timestamp: number}) => {
+    setFullSizeLoading(true);
+    try {
+      const fullSizeData = await window.electronAPI.file.getScreenshotsInRange(sessionId, screenshot.timestamp, screenshot.timestamp + 1, 'full');
+      if (fullSizeData && fullSizeData.length > 0) {
+        setFullSizeImage(fullSizeData[0].path);
+      }
+    } catch (error) {
+      console.error('Failed to load full-size screenshot:', error);
+    } finally {
+      setFullSizeLoading(false);
+    }
+  };
+
+  const closeFullSizeModal = () => {
+    setFullSizeImage(null);
+  };
+
+  // Handle escape key to close modal
+  React.useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && fullSizeImage) {
+        closeFullSizeModal();
+      }
+    };
+
+    if (fullSizeImage) {
+      document.addEventListener('keydown', handleEscape);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [fullSizeImage]);
 
   if (loading) {
     return (
@@ -64,23 +101,59 @@ const MultiScreenshotDisplay: React.FC<MultiScreenshotDisplayProps> = ({ session
   }
 
   return (
-    <div className="flex space-x-3">
-      {screenshots.map((screenshot, idx) => (
-        <div key={idx} className="flex-shrink-0 bg-gray-900 rounded overflow-hidden w-32 h-20">
-          <img 
-            src={`file://${screenshot.path}`} 
-            alt={`Screenshot at ${screenshot.timestamp}ms`}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
-          />
+    <>
+      <div className="flex space-x-3">
+        {screenshots.map((screenshot, idx) => (
+          <div key={idx} className="flex-shrink-0 bg-gray-900 rounded overflow-hidden w-32 h-20 cursor-pointer hover:ring-2 hover:ring-blue-500 transition-all">
+            <img 
+              src={`file://${screenshot.path}`} 
+              alt={`Screenshot at ${screenshot.timestamp}ms`}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+              onDoubleClick={() => handleImageDoubleClick(screenshot)}
+            />
+          </div>
+        ))}
+        {screenshots.length === 0 && (
+          <div className="text-xs text-gray-500">No screenshots in range</div>
+        )}
+      </div>
+      
+      {/* Full-size image modal */}
+      {fullSizeImage && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50"
+          onClick={closeFullSizeModal}
+        >
+          <div className="relative max-w-full max-h-full p-4">
+            <img 
+              src={`file://${fullSizeImage}`}
+              alt="Full-size screenshot"
+              className="max-w-full max-h-full object-contain"
+              onError={(e) => {
+                console.error('Failed to load full-size image');
+                closeFullSizeModal();
+              }}
+            />
+            <button 
+              onClick={closeFullSizeModal}
+              className="absolute top-6 right-6 text-white text-2xl font-bold hover:text-gray-300 bg-black bg-opacity-50 rounded-full w-10 h-10 flex items-center justify-center"
+            >
+              ×
+            </button>
+          </div>
         </div>
-      ))}
-      {screenshots.length === 0 && (
-        <div className="text-xs text-gray-500">No screenshots in range</div>
       )}
-    </div>
+      
+      {/* Loading overlay for full-size image */}
+      {fullSizeLoading && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="text-white text-lg">Loading full-size image...</div>
+        </div>
+      )}
+    </>
   );
 };
 
