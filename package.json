@@ -14,6 +14,9 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "start": "electron .",
     "dist": "npm run build && electron-builder",
+    "build:dmg": "chmod +x scripts/build-dmg.sh && scripts/build-dmg.sh",
+    "bundle:backend": "node scripts/bundle-backend.js",
+    "verify:build": "chmod +x scripts/verify-build.sh && scripts/verify-build.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

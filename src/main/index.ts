@@ -4,6 +4,8 @@ import { WebSocketServer } from './websocket';
 import { RecordingManager } from './recording';
 import { ScreenshotManager } from './screenshot';
 import { getRecordingsDir } from './config';
+import { BackendManager } from './backend-manager';
+import { ConfigManager } from './config-manager';
 
 // Enable live reload for Electron in development
 if (process.env.NODE_ENV !== 'production') {
@@ -39,6 +41,8 @@ let floatingWindow: BrowserWindow | null = null;
 let wsServer: WebSocketServer | null = null;
 let recordingManager: RecordingManager | null = null;
 let screenshotManager: ScreenshotManager | null = null;
+let backendManager: BackendManager | null = null;
+let configManager: ConfigManager | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -127,6 +131,32 @@ app.whenReady().then(async () => {
             }
           }
         },
+        {
+          label: 'Settings',
+          click: () => {
+            // Create settings window
+            const settingsWindow = new BrowserWindow({
+              width: 800,
+              height: 600,
+              titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+              webPreferences: {
+                preload: path.join(__dirname, '../preload/index.js'),
+                contextIsolation: true,
+                enableRemoteModule: false,
+                nodeIntegration: false,
+              },
+            });
+
+            const isDev = process.env.NODE_ENV === 'development';
+            if (isDev) {
+              settingsWindow.loadURL(`http://localhost:3000?page=settings`);
+            } else {
+              settingsWindow.loadFile(path.join(__dirname, '../renderer/index.html'), {
+                hash: 'settings'
+              });
+            }
+          }
+        },
         { type: 'separator' },
         {
           label: 'Reload',
@@ -174,6 +204,8 @@ app.whenReady().then(async () => {
   wsServer = new WebSocketServer();
   recordingManager = new RecordingManager();
   screenshotManager = new ScreenshotManager();
+  backendManager = new BackendManager();
+  configManager = new ConfigManager();
   
   // Start WebSocket server for Python backend communication
   try {
@@ -194,6 +226,23 @@ app.whenReady().then(async () => {
       'WebSocket Server Error',
       `Failed to start WebSocket server: ${error}`
     );
+  }
+
+  // Start Python backend in production
+  if (backendManager && (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV)) {
+    try {
+      console.log('Starting Python backend...');
+      const backendStarted = await backendManager.startBackend();
+      if (!backendStarted) {
+        console.error('Failed to start Python backend');
+        await backendManager.showBackendErrorDialog();
+      } else {
+        console.log('Python backend started successfully');
+      }
+    } catch (error) {
+      console.error('Error starting Python backend:', error);
+      await backendManager.showBackendErrorDialog();
+    }
   }
   
   app.on('activate', () => {
@@ -217,10 +266,19 @@ app.on('window-all-closed', async () => {
 
 // Clean up on app quit
 app.on('before-quit', async (event) => {
-  if (wsServer) {
+  if (wsServer || backendManager) {
     event.preventDefault();
-    await wsServer.stop();
-    wsServer = null;
+    
+    if (wsServer) {
+      await wsServer.stop();
+      wsServer = null;
+    }
+    
+    if (backendManager) {
+      await backendManager.stopBackend();
+      backendManager = null;
+    }
+    
     app.quit();
   }
 });
@@ -814,4 +872,25 @@ ipcMain.handle('get-screenshot-path', async (_, sessionId: string, timestamp: nu
 // Expose settings to renderer
 ipcMain.handle('get-recordings-dir', async () => {
   return getRecordingsDir();
+});
+
+// Configuration IPC handlers
+ipcMain.handle('get-app-config', async () => {
+  return configManager?.getAppConfig();
+});
+
+ipcMain.handle('get-config-values', async () => {
+  return configManager?.getConfigValues();
+});
+
+ipcMain.handle('save-config-values', async (_, values: Record<string, string>) => {
+  return configManager?.saveConfigValues(values);
+});
+
+ipcMain.handle('select-directory', async () => {
+  return configManager?.selectDirectory();
+});
+
+ipcMain.handle('get-app-info', async () => {
+  return configManager?.getAppInfo();
 });

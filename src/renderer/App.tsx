@@ -2,20 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { RecordingPage } from './pages/RecordingPage';
 import { ScreenshotPage } from './pages/ScreenshotPage';
 import { ReviewPage } from './pages/ReviewPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { ReviewPageEnhanced } from './pages/ReviewPageEnhanced';
 import { ReviewPageWithWidgets } from './pages/ReviewPageWithWidgets';
 import { ReviewPageSidebar } from './pages/ReviewPageSidebar';
 import { FloatingWindow } from './components/FloatingWindow';
 
-type Page = 'recording' | 'screenshot' | 'review';
+type Page = 'recording' | 'screenshot' | 'review' | 'settings';
 
 function App() {
   // Check for test mode from URL parameters
   const urlParams = new URLSearchParams(window.location.search);
   const testMode = urlParams.get('testMode');
   const testSessionId = urlParams.get('sessionId');
+  const pageParam = urlParams.get('page');
   
-  const [currentPage, setCurrentPage] = useState<Page>(testMode === 'review' ? 'review' : 'recording');
+  const [currentPage, setCurrentPage] = useState<Page>(
+    testMode === 'review' ? 'review' : 
+    pageParam === 'settings' ? 'settings' : 
+    window.location.hash === '#settings' ? 'settings' : 'recording'
+  );
   const [sessionId, setSessionId] = useState<string | null>(testSessionId || null);
   const [isFloatingMode, setIsFloatingMode] = useState(false);
 
@@ -125,6 +131,7 @@ function App() {
         {currentPage === 'review' && sessionId && (
           <ReviewPageSidebar sessionId={sessionId} />
         )}
+        {currentPage === 'settings' && <SettingsPage />}
       </main>
     </div>
   );

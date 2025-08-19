@@ -221,6 +221,21 @@ npm run build
 npm run dist
 ```
 
+### Build DMG Installer (macOS)
+
+To create a distributable DMG installer:
+
+```bash
+npm run build:dmg
+```
+
+This creates a complete installer that bundles both the frontend and Python backend. Users can:
+1. Download and open the DMG file
+2. Drag Screen2Action to Applications folder
+3. Launch the app and configure API keys via Settings menu
+
+See [DMG Build Guide](docs/DMG_BUILD_GUIDE.md) for detailed instructions.
+
 ### Run Tests
 
 ```bash
