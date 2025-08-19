@@ -360,3 +360,34 @@ When taking notes during recording, you can use timestamp format:
 - Format: `[MM:SS] Your note here`
 - Example: `[01:30] Important discussion point`
 - Notes without timestamps will be distributed evenly across recording duration
+
+## Unified Recordings Storage (floating_UI)
+
+All sessions (screenshots, notes, audio) are stored under a single directory shared by Electron (frontend) and Python (backend).
+
+Priority when resolving the recordings directory:
+1) Environment variable (highest)
+- Set S2A_RECORDINGS_DIR to an absolute path (supports ~)
+- Example (zsh):
+```bash
+export S2A_RECORDINGS_DIR=~/Screen2Action/recordings
+```
+2) Config file: `config/app.json`
+```json
+{
+  "recordingsDir": "~/Screen2Action/recordings"
+}
+```
+3) Fallback
+- macOS: `~/Documents/Screen2Action/recordings`
+
+Details
+- Electron main uses `src/main/config.ts:getRecordingsDir()` and all file/audio/screenshot IPC handlers rely on it
+- Backend uses the same resolution logic in `backend/app/services/recording_service.py`
+- Renderer can query the resolved path via `window.electronAPI.settings.getRecordingsDir()`
+
+Migrating existing sessions
+- Move your session folders into the configured recordingsDir, preserving structure:
+```
+<recordingsDir>/<sessionId>/{metadata.json, notes.md, *_notes.md, screenshots/, audio/}
+```

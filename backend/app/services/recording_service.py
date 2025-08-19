@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,53 @@ from app.models.messages import RecordingSession
 
 logger = logging.getLogger(__name__)
 
+
+def _expand_home(p: str) -> str:
+    if not p:
+        return p
+    if p.startswith('~'):
+        return os.path.join(os.path.expanduser('~'), p[1:])
+    return p
+
+
+def _resolve_recordings_dir() -> Path:
+    # 1) Environment variable
+    env_dir = os.environ.get('S2A_RECORDINGS_DIR', '').strip()
+    if env_dir:
+        resolved = Path(os.path.abspath(_expand_home(env_dir)))
+        resolved.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using recordings dir from env: {resolved}")
+        return resolved
+
+    # 2) config/app.json (try several plausible locations)
+    here = Path(__file__).resolve()
+    possible = [
+        Path.cwd() / 'config' / 'app.json',                 # run from project root
+        Path.cwd().parent / 'config' / 'app.json',          # run from backend/
+        here.parents[3] / 'config' / 'app.json',            # backend/app/services -> config
+        here.parents[4] / 'config' / 'app.json',            # alternative path
+    ]
+    for cfg in possible:
+        try:
+            if cfg.exists():
+                with open(cfg, 'r') as f:
+                    data = json.load(f)
+                rec = (data or {}).get('recordingsDir', '').strip()
+                if rec:
+                    resolved = Path(os.path.abspath(_expand_home(rec)))
+                    resolved.mkdir(parents=True, exist_ok=True)
+                    logger.info(f"Using recordings dir from config {cfg}: {resolved}")
+                    return resolved
+        except Exception as e:
+            logger.warning(f"Error reading config at {cfg}: {e}")
+
+    # 3) Fallback to Documents/Screen2Action/recordings
+    documents = Path.home() / 'Documents'
+    fallback = documents / 'Screen2Action' / 'recordings'
+    fallback.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Using fallback recordings dir: {fallback}")
+    return fallback
+
 class RecordingService:
     def __init__(self):
         self.is_recording = False
@@ -23,8 +71,8 @@ class RecordingService:
         self.screenshot_task: Optional[asyncio.Task] = None
         self.audio_task: Optional[asyncio.Task] = None
         self.screenshot_interval = 10  # seconds
-        self.recordings_dir = Path("recordings")
-        self.recordings_dir.mkdir(exist_ok=True)
+        # Use unified recordings directory
+        self.recordings_dir = _resolve_recordings_dir()
         # NOTE: Frontend/main process now prefixes audio & markdown with YYYY_MM_DD_HH_mm_SS.
         # If backend parity is required for any future audio processing here, implement similarly.
         self.audio_sample_rate = 44100
@@ -42,6 +90,29 @@ class RecordingService:
         self.preferred_mic_pattern: Optional[str] = "macbook pro microphone"
         self.preferred_sys_pattern: Optional[str] = None
         # Environment variable overrides or config could be added later
+        self.websocket_client = None
+    
+    def set_websocket_client(self, client):
+        """Set the WebSocket client for communication with Electron"""
+        self.websocket_client = client
+    
+    async def hide_floating_window(self):
+        """Send message to hide floating window"""
+        if self.websocket_client:
+            try:
+                await self.websocket_client.send_event('hide_floating_window', {})
+                # Wait a bit for window to hide
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.warning(f"Failed to hide floating window: {e}")
+    
+    async def show_floating_window(self):
+        """Send message to show floating window"""
+        if self.websocket_client:
+            try:
+                await self.websocket_client.send_event('show_floating_window', {})
+            except Exception as e:
+                logger.warning(f"Failed to show floating window: {e}")
     
     async def start_recording(self, params: Dict[str, Any]) -> str:
         """Start a new recording session"""

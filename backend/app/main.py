@@ -34,14 +34,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services
-recording_service = RecordingService()
-screenshot_service = ScreenshotService()
-llm_service = LLMService()
-mcp_service = MCPService()
-
 # WebSocket client to connect to Electron
 electron_client = WebSocketClient("ws://localhost:8765")
+
+# Initialize services
+recording_service = RecordingService()
+recording_service.set_websocket_client(electron_client)
+screenshot_service = ScreenshotService()
+screenshot_service.set_websocket_client(electron_client)
+llm_service = LLMService()
+mcp_service = MCPService()
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -107,6 +109,29 @@ async def startup_event():
                     data.get('payload', {}).get('context', {})
                 )
                 await electron_client.send_response(data['id'], {"success": True, "result": result})
+            elif data.get('action') == 'enhance_note':
+                # Handle note enhancement
+                logger.info("Processing enhance_note action")
+                payload = data.get('payload', {})
+                result = await llm_service.enhance_note(
+                    payload.get('prompt', ''),
+                    {"noteContent": payload.get('note', '')}
+                )
+                await electron_client.send_response(data['id'], {"enhanced": result.get('response', '')})
+            elif data.get('action') == 'process_mcp':
+                # Handle MCP processing
+                logger.info("Processing process_mcp action")
+                payload = data.get('payload', {})
+                result = await mcp_service.run_intelligent_task(
+                    payload.get('prompt', ''),
+                    payload.get('context', {})
+                )
+                await electron_client.send_response(data['id'], {"response": str(result.get('result', result))})
+            elif data.get('action') == 'select_audio_devices':
+                # Handle audio device selection
+                logger.info("Processing select_audio_devices action")
+                # This is handled by the frontend, just acknowledge
+                await electron_client.send_response(data['id'], {"success": True})
             elif data.get('action') == 'process_command':
                 # Handle AI commands
                 message = Message(**data)
@@ -286,6 +311,67 @@ async def process_message(message: Message) -> Message:
                 type=MessageType.RESPONSE,
                 action=message.action,
                 payload={"success": True, "result": result}
+            )
+        
+        elif message.action == "enhance_note":
+            # Handle note enhancement directly
+            result = await llm_service.enhance_note(
+                message.payload.get("prompt", ""),
+                {"noteContent": message.payload.get("note", "")}
+            )
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"enhanced": result.get("response", "")}
+            )
+        
+        elif message.action == "process_mcp":
+            # Handle MCP processing directly
+            result = await mcp_service.run_intelligent_task(
+                message.payload.get("prompt", ""),
+                message.payload.get("context", {})
+            )
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"response": str(result.get("result", result))}
+            )
+        
+        elif message.action == "send_mcp_message":
+            # Handle MCP message with selected tools
+            message_text = message.payload.get("message")
+            context = message.payload.get("context", "")
+            tools = message.payload.get("tools", [])
+            
+            # Build task description with context and tools
+            task_description = f"{message_text}\n\nContext:\n{context}"
+            if tools:
+                task_description += f"\n\nPlease use the following tools if needed: {', '.join(tools)}"
+            
+            result = await mcp_service.run_intelligent_task(
+                task_description,
+                {"tools": tools, "context": context}
+            )
+            
+            # Extract the response from the result
+            response_text = ""
+            if isinstance(result, dict):
+                if "result" in result:
+                    response_text = str(result["result"])
+                elif "error" in result:
+                    response_text = f"Error: {result['error']}"
+                else:
+                    response_text = str(result)
+            else:
+                response_text = str(result)
+            
+            return Message(
+                id=message.id,
+                type=MessageType.RESPONSE,
+                action=message.action,
+                payload={"success": True, "response": response_text}
             )
             
         elif message.action == "list_audio_devices":

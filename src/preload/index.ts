@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   ai: {
     sendCommand: (data: any) => ipcRenderer.invoke('send-to-ai', data),
+    enhanceNote: (data: any) => ipcRenderer.invoke('enhance-note', data),
+    processMCP: (data: any) => ipcRenderer.invoke('process-mcp', data),
   },
   
   audio: {
@@ -45,6 +47,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFloatingWindow: () => ipcRenderer.invoke('open-floating-window'),
     closeFloatingWindow: () => ipcRenderer.invoke('close-floating-window'),
     expandToMainWindow: (sessionId?: string, notes?: string) => ipcRenderer.invoke('expand-to-main-window', sessionId, notes),
+  },
+  
+  settings: {
+    getRecordingsDir: () => ipcRenderer.invoke('get-recordings-dir'),
   },
   
   // Event listeners
@@ -86,6 +92,8 @@ export interface ElectronAPI {
   };
   ai: {
     sendCommand: (data: any) => Promise<any>;
+    enhanceNote: (data: any) => Promise<any>;
+    processMCP: (data: any) => Promise<any>;
   };
   audio: {
     play: (filePath: string) => Promise<void>;
@@ -106,6 +114,9 @@ export interface ElectronAPI {
     openFloatingWindow: () => Promise<boolean>;
     closeFloatingWindow: () => Promise<boolean>;
     expandToMainWindow: (sessionId?: string, notes?: string) => Promise<boolean>;
+  };
+  settings: {
+    getRecordingsDir: () => Promise<string>;
   };
   on: (channel: string, callback: Function) => void;
   removeListener: (channel: string, callback: Function) => void;

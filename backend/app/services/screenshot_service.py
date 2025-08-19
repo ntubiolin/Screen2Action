@@ -1,5 +1,6 @@
 import logging
 import uuid
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -18,6 +19,29 @@ class ScreenshotService:
         self.screenshots_dir = Path("screenshots")
         self.screenshots_dir.mkdir(exist_ok=True)
         self.screenshots_cache: Dict[str, Screenshot] = {}
+        self.websocket_client = None
+    
+    def set_websocket_client(self, client):
+        """Set the WebSocket client for communication with Electron"""
+        self.websocket_client = client
+    
+    async def hide_floating_window(self):
+        """Send message to hide floating window"""
+        if self.websocket_client:
+            try:
+                await self.websocket_client.send_event('hide_floating_window', {})
+                # Wait a bit for window to hide
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.warning(f"Failed to hide floating window: {e}")
+    
+    async def show_floating_window(self):
+        """Send message to show floating window"""
+        if self.websocket_client:
+            try:
+                await self.websocket_client.send_event('show_floating_window', {})
+            except Exception as e:
+                logger.warning(f"Failed to show floating window: {e}")
     
     async def capture(self, options: Dict[str, Any] = None) -> str:
         """Capture a screenshot"""
