@@ -41,10 +41,15 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [currentParagraph, setCurrentParagraph] = useState<ParsedNote | null>(null);
   const [cursorLine, setCursorLine] = useState(1);
   const [sectionHeights, setSectionHeights] = useState({
-    screenshots: 35, // Screenshots and audio section
-    mcp: 30,        // MCP settings section
-    chat: 35        // Chat section (calculated as remainder)
+    screenshots: 35,
+    mcp: 30,
+    chat: 35,
   });
+  // Keep a ref in sync with latest heights to avoid stale closures in mouse handlers
+  const sectionHeightsRef = useRef(sectionHeights);
+  useEffect(() => {
+    sectionHeightsRef.current = sectionHeights;
+  }, [sectionHeights]);
   
   // Screenshot related state
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
@@ -75,6 +80,12 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const rootRef = useRef<HTMLDivElement>(null);
   const [rootTop, setRootTop] = useState(0);
   const { notes: storeNotes } = useRecordingStore();
+
+  // Refs to manage drag state to avoid re-renders breaking the drag handlers
+  const isResizing1Ref = useRef(false);
+  const isResizing2Ref = useRef(false);
+  const startYRef = useRef(0);
+  const startHeightsRef = useRef(sectionHeights);
 
   useEffect(() => {
     loadMarkdownFile();
@@ -597,89 +608,94 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     }
   };
 
-  // Handle resize for both dividers
+  // Handle resize for both dividers (stable listeners; do not depend on sectionHeights)
   useEffect(() => {
-    if (!resizeRef1.current || !resizeRef2.current) return;
-    
-    let isResizing1 = false;
-    let isResizing2 = false;
-    let startY = 0;
-    let startHeights = { ...sectionHeights };
-    
+    const resizeBar1 = resizeRef1.current;
+    const resizeBar2 = resizeRef2.current;
+    if (!resizeBar1 || !resizeBar2) {
+      // If bars aren't mounted (e.g., no current paragraph), skip binding
+      return;
+    }
+
     const handleMouseDown1 = (e: MouseEvent) => {
-      isResizing1 = true;
-      startY = e.clientY;
-      startHeights = { ...sectionHeights };
+      isResizing1Ref.current = true;
+      isResizing2Ref.current = false;
+      startYRef.current = e.clientY;
+      startHeightsRef.current = { ...sectionHeightsRef.current };
       document.body.style.cursor = 'ns-resize';
       document.body.style.userSelect = 'none';
       e.preventDefault();
     };
-    
+
     const handleMouseDown2 = (e: MouseEvent) => {
-      isResizing2 = true;
-      startY = e.clientY;
-      startHeights = { ...sectionHeights };
+      isResizing2Ref.current = true;
+      isResizing1Ref.current = false;
+      startYRef.current = e.clientY;
+      startHeightsRef.current = { ...sectionHeightsRef.current };
       document.body.style.cursor = 'ns-resize';
       document.body.style.userSelect = 'none';
       e.preventDefault();
     };
-    
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing1 && !isResizing2) return;
-      
-      const deltaY = e.clientY - startY;
+      if (!isResizing1Ref.current && !isResizing2Ref.current) return;
+
+      const deltaY = e.clientY - startYRef.current;
       const containerHeight = resizeRef1.current?.parentElement?.clientHeight || 600;
       const deltaPercent = (deltaY / containerHeight) * 100;
-      
-      if (isResizing1) {
+
+      if (isResizing1Ref.current) {
         // Resizing between screenshots and MCP
-        const newScreenshotsHeight = Math.min(70, Math.max(10, startHeights.screenshots + deltaPercent));
+        const start = startHeightsRef.current;
+        const newScreenshotsHeight = Math.min(70, Math.max(10, start.screenshots + deltaPercent));
         const totalRemainder = 100 - newScreenshotsHeight;
-        const mcpRatio = startHeights.mcp / (startHeights.mcp + startHeights.chat);
-        const newMcpHeight = Math.min(60, Math.max(10, totalRemainder * mcpRatio));
-        const newChatHeight = totalRemainder - newMcpHeight;
-        
+        const mcpRatio = start.mcp / (start.mcp + start.chat || 1);
+        const tentativeMcp = totalRemainder * mcpRatio;
+        const newMcpHeight = Math.min(60, Math.max(10, tentativeMcp));
+        const newChatHeight = Math.max(10, totalRemainder - newMcpHeight);
+
         setSectionHeights({
           screenshots: newScreenshotsHeight,
           mcp: newMcpHeight,
-          chat: newChatHeight
+          chat: newChatHeight,
         });
-      } else if (isResizing2) {
+      } else if (isResizing2Ref.current) {
         // Resizing between MCP and chat
-        const screenshotsHeight = startHeights.screenshots;
+        const start = startHeightsRef.current;
+        const screenshotsHeight = start.screenshots;
         const totalForMcpAndChat = 100 - screenshotsHeight;
-        const newMcpHeight = Math.min(60, Math.max(10, startHeights.mcp + deltaPercent));
+        const newMcpHeight = Math.min(60, Math.max(10, start.mcp + deltaPercent));
         const newChatHeight = Math.max(10, totalForMcpAndChat - newMcpHeight);
-        
+
         setSectionHeights({
           screenshots: screenshotsHeight,
           mcp: newMcpHeight,
-          chat: newChatHeight
+          chat: newChatHeight,
         });
       }
     };
-    
+
     const handleMouseUp = () => {
-      isResizing1 = false;
-      isResizing2 = false;
+      if (!isResizing1Ref.current && !isResizing2Ref.current) return;
+      isResizing1Ref.current = false;
+      isResizing2Ref.current = false;
       document.body.style.cursor = 'default';
       document.body.style.userSelect = '';
     };
-    
-    const resizeBar1 = resizeRef1.current;
-    const resizeBar2 = resizeRef2.current;
+
     resizeBar1.addEventListener('mousedown', handleMouseDown1);
     resizeBar2.addEventListener('mousedown', handleMouseDown2);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    
+
     return () => {
       resizeBar1.removeEventListener('mousedown', handleMouseDown1);
       resizeBar2.removeEventListener('mousedown', handleMouseDown2);
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [sectionHeights]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarOpen, currentParagraph]);
 
   return (
     <div ref={rootRef} className="h-full flex bg-gray-900 relative">
