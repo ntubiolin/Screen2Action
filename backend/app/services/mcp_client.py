@@ -166,9 +166,29 @@ class MCPClient:
             import os
             llm = None
             
-            # Try OpenAI first
-            openai_key = os.getenv('OPENAI_API_KEY')
-            if openai_key:
+            # Try Azure OpenAI first
+            azure_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+            azure_api_key = os.getenv('AZURE_OPENAI_API_KEY')
+            azure_api_version = os.getenv('AZURE_OPENAI_API_VERSION')
+            azure_deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT')
+            
+            if azure_endpoint and azure_api_key and azure_api_version and azure_deployment:
+                try:
+                    from langchain_openai import AzureChatOpenAI
+                    llm = AzureChatOpenAI(
+                        azure_endpoint=azure_endpoint,
+                        openai_api_key=azure_api_key,
+                        openai_api_version=azure_api_version,
+                        deployment_name=azure_deployment,
+                        temperature=0.3
+                    )
+                    logger.info(f"Initialized Azure OpenAI LLM with deployment: {azure_deployment}")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize Azure OpenAI: {e}")
+                    llm = None
+            # Try OpenAI if Azure not configured or failed
+            elif os.getenv('OPENAI_API_KEY'):
+                openai_key = os.getenv('OPENAI_API_KEY')
                 llm = ChatOpenAI(
                     model=os.getenv('OPENAI_MODEL', 'gpt-4o'),
                     api_key=openai_key,

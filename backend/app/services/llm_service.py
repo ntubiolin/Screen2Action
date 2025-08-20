@@ -14,7 +14,26 @@ class LLMService:
         self.model = os.getenv("LLM_MODEL", "gpt-4")
         self.client = None
         
-        if self.api_key:
+        # Check for Azure OpenAI configuration
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+        azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+        
+        if azure_endpoint and azure_api_key and azure_api_version and azure_deployment:
+            try:
+                from openai import AzureOpenAI
+                self.client = AzureOpenAI(
+                    azure_endpoint=azure_endpoint,
+                    api_key=azure_api_key,
+                    api_version=azure_api_version
+                )
+                # Use Azure deployment name as model
+                self.model = azure_deployment
+                logger.info(f"Azure OpenAI client initialized with deployment: {azure_deployment}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Azure OpenAI client: {e}")
+        elif self.api_key:
             try:
                 from openai import OpenAI
                 self.client = OpenAI(api_key=self.api_key)
@@ -25,7 +44,7 @@ class LLMService:
     async def enhance_note(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Enhance or process a note with AI"""
         if not self.client:
-            return {"response": "LLM service not configured. Please set OPENAI_API_KEY."}
+            return {"response": "LLM service not configured. Please set OPENAI_API_KEY or Azure OpenAI credentials."}
         
         try:
             # Prepare system prompt
