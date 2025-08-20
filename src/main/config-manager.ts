@@ -67,7 +67,7 @@ export class ConfigManager {
     const appConfig = await this.getAppConfig();
     for (const field of appConfig.configuration.configurable_keys) {
       if (process.env[field.key]) {
-        values[field.key] = process.env[field.key];
+        values[field.key] = process.env[field.key] || '';
       }
     }
 

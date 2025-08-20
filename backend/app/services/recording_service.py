@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,29 @@ def _expand_home(p: str) -> str:
         return p
     if p.startswith('~'):
         return os.path.join(os.path.expanduser('~'), p[1:])
+    return p
+
+
+def _resolve_logs_dir() -> Path:
+    """Resolve base logs directory to align with Electron (supports env override)."""
+    env_dir = os.environ.get('S2A_LOGS_DIR', '').strip()
+    if env_dir:
+        p = Path(os.path.abspath(_expand_home(env_dir)))
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    if sys.platform == 'darwin':  # type: ignore[name-defined]
+        p = Path.home() / 'Library' / 'Application Support' / 'screen2action' / 'logs'
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    if os.name == 'nt':
+        # On Windows, fall back to %APPDATA%/screen2action/logs
+        appdata = os.environ.get('APPDATA', str(Path.home() / 'AppData' / 'Roaming'))
+        p = Path(appdata) / 'screen2action' / 'logs'
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    # Linux/others
+    p = Path.home() / '.local' / 'share' / 'screen2action' / 'logs'
+    p.mkdir(parents=True, exist_ok=True)
     return p
 
 
@@ -91,6 +115,8 @@ class RecordingService:
         self.preferred_sys_pattern: Optional[str] = None
         # Environment variable overrides or config could be added later
         self.websocket_client = None
+        # Session-scoped logging handler
+        self._session_log_handler: Optional[logging.Handler] = None
     
     def set_websocket_client(self, client):
         """Set the WebSocket client for communication with Electron"""
@@ -127,6 +153,25 @@ class RecordingService:
         session_dir.mkdir(parents=True, exist_ok=True)
         (session_dir / "screenshots").mkdir(exist_ok=True)
         (session_dir / "audio").mkdir(exist_ok=True)
+        
+        # Configure a session-scoped file handler for backend logs
+        try:
+            logs_base = _resolve_logs_dir()
+            session_logs_dir = logs_base / 'sessions' / session_id
+            session_logs_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            session_log_path = session_logs_dir / f"backend-{timestamp}.log"
+            handler = logging.FileHandler(session_log_path)
+            handler.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            # Attach to root so all logs propagate
+            root_logger = logging.getLogger()
+            root_logger.addHandler(handler)
+            self._session_log_handler = handler
+            logger.info(f"Attached session log handler: {session_log_path}")
+        except Exception as e:
+            logger.warning(f"Failed to attach session log handler: {e}")
         
         self.current_session = RecordingSession(
             id=session_id,
@@ -179,6 +224,18 @@ class RecordingService:
                 "screenshots_count": len(self.current_session.screenshots),
                 "notes_count": len(self.current_session.notes)
             }
+            
+            # Detach session log handler
+            try:
+                if self._session_log_handler:
+                    root_logger = logging.getLogger()
+                    root_logger.removeHandler(self._session_log_handler)
+                    self._session_log_handler.close()
+                    logger.info("Detached session log handler")
+            except Exception as e:
+                logger.warning(f"Failed to detach session log handler: {e}")
+            finally:
+                self._session_log_handler = None
             
             self.current_session = None
             logger.info(f"Stopped recording session: {result}")

@@ -2,12 +2,32 @@ import { spawn, ChildProcess } from 'child_process';
 import { app, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { Logger } from './logger';
 
 export class BackendManager {
   private backendProcess: ChildProcess | null = null;
-  private isProduction = !process.env.NODE_ENV || process.env.NODE_ENV === 'production';
+  private isProduction = app.isPackaged;
+  private logger: Logger;
 
-  constructor() {}
+  constructor() {
+    this.logger = new Logger('backend-manager');
+    this.logger.info('BackendManager initialized', {
+      isProduction: this.isProduction,
+      isPackaged: app.isPackaged,
+      NODE_ENV: process.env.NODE_ENV,
+      appPath: app.getAppPath(),
+      resourcesPath: process.resourcesPath
+    });
+  }
+
+  /** Rotate logger into session folder */
+  setSession(sessionId: string) {
+    try {
+      this.logger.useSession(sessionId);
+    } catch (e) {
+      this.logger.warn('Failed to switch backend-manager logger to session', { error: String(e) });
+    }
+  }
 
   /**
    * Start the Python backend server
@@ -17,13 +37,20 @@ export class BackendManager {
       const backendPath = this.getBackendPath();
       const startupScript = path.join(backendPath, 'start_backend.py');
 
-      console.log('Starting backend from:', backendPath);
+      this.logger.info('Starting backend', {
+        backendPath,
+        startupScript,
+        exists: fs.existsSync(startupScript),
+        isProduction: this.isProduction
+      });
 
       // In production, use the bundled startup script
       if (this.isProduction && fs.existsSync(startupScript)) {
+        this.logger.info('Using production startup script');
         this.backendProcess = spawn('python3', [startupScript], {
           cwd: backendPath,
-          stdio: ['ignore', 'pipe', 'pipe']
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, PYTHONUNBUFFERED: '1' }
         });
       } else {
         // Development mode - use the development startup
@@ -31,24 +58,34 @@ export class BackendManager {
         
         // Try to use uv first, fall back to python
         const pythonCmd = this.findPythonExecutable(backendPath);
+        this.logger.info('Using development mode', {
+          runScript,
+          pythonCmd,
+          scriptExists: fs.existsSync(runScript)
+        });
         this.backendProcess = spawn(pythonCmd, [runScript], {
           cwd: backendPath,
-          stdio: ['ignore', 'pipe', 'pipe']
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, PYTHONUNBUFFERED: '1' }
         });
       }
 
       if (this.backendProcess) {
+        this.logger.info('Backend process spawned', { pid: this.backendProcess.pid });
         this.setupBackendListeners();
         
         // Wait a bit to see if the process starts successfully
         await new Promise(resolve => setTimeout(resolve, 2000));
         
-        return !this.backendProcess.killed;
+        const isRunning = !this.backendProcess.killed;
+        this.logger.info('Backend startup check', { isRunning, pid: this.backendProcess.pid });
+        return isRunning;
       }
 
+      this.logger.error('Failed to spawn backend process');
       return false;
     } catch (error) {
-      console.error('Failed to start backend:', error);
+      this.logger.error('Failed to start backend', error);
       return false;
     }
   }
@@ -58,11 +95,13 @@ export class BackendManager {
    */
   async stopBackend(): Promise<void> {
     if (this.backendProcess && !this.backendProcess.killed) {
+      this.logger.info('Stopping backend', { pid: this.backendProcess.pid });
       this.backendProcess.kill('SIGTERM');
       
       // Wait for graceful shutdown, then force kill if needed
       setTimeout(() => {
         if (this.backendProcess && !this.backendProcess.killed) {
+          this.logger.warn('Force killing backend process');
           this.backendProcess.kill('SIGKILL');
         }
       }, 5000);
@@ -82,13 +121,22 @@ export class BackendManager {
    * Get the path to the backend directory
    */
   private getBackendPath(): string {
+    let backendPath: string;
     if (this.isProduction) {
       // In production, backend is in extraResources
-      return path.join(process.resourcesPath, 'backend');
+      backendPath = path.join(process.resourcesPath, 'backend');
     } else {
       // In development, backend is in the project root
-      return path.join(app.getAppPath(), 'backend');
+      backendPath = path.join(app.getAppPath(), 'backend');
     }
+    
+    this.logger.debug('Backend path resolved', {
+      backendPath,
+      exists: fs.existsSync(backendPath),
+      contents: fs.existsSync(backendPath) ? fs.readdirSync(backendPath).slice(0, 10) : []
+    });
+    
+    return backendPath;
   }
 
   /**
@@ -103,12 +151,15 @@ export class BackendManager {
 
     for (const venvPath of venvPaths) {
       if (fs.existsSync(venvPath) || fs.existsSync(venvPath + '.exe')) {
+        this.logger.info('Found Python in venv', { path: venvPath });
         return venvPath;
       }
     }
 
     // Fall back to system Python
-    return process.platform === 'win32' ? 'python' : 'python3';
+    const systemPython = process.platform === 'win32' ? 'python' : 'python3';
+    this.logger.info('Using system Python', { command: systemPython });
+    return systemPython;
   }
 
   /**
@@ -118,20 +169,26 @@ export class BackendManager {
     if (!this.backendProcess) return;
 
     this.backendProcess.stdout?.on('data', (data) => {
-      console.log('Backend stdout:', data.toString());
+      const message = data.toString().trim();
+      if (message) {
+        this.logger.info('[Backend stdout]', message);
+      }
     });
 
     this.backendProcess.stderr?.on('data', (data) => {
-      console.error('Backend stderr:', data.toString());
+      const message = data.toString().trim();
+      if (message) {
+        this.logger.error('[Backend stderr]', message);
+      }
     });
 
     this.backendProcess.on('close', (code) => {
-      console.log('Backend process closed with code:', code);
+      this.logger.info('Backend process closed', { code });
       this.backendProcess = null;
     });
 
     this.backendProcess.on('error', (error) => {
-      console.error('Backend process error:', error);
+      this.logger.error('Backend process error', error);
     });
   }
 

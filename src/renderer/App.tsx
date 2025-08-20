@@ -7,6 +7,7 @@ import { ReviewPageEnhanced } from './pages/ReviewPageEnhanced';
 import { ReviewPageWithWidgets } from './pages/ReviewPageWithWidgets';
 import { ReviewPageSidebar } from './pages/ReviewPageSidebar';
 import { FloatingWindow } from './components/FloatingWindow';
+import { frontendLogger } from './utils/logger'; // Initialize frontend logging
 
 type Page = 'recording' | 'screenshot' | 'review' | 'settings';
 
@@ -26,6 +27,15 @@ function App() {
   const [isFloatingMode, setIsFloatingMode] = useState(false);
 
   useEffect(() => {
+    // Log app initialization
+    console.info('App initialized', {
+      testMode,
+      testSessionId,
+      pageParam,
+      currentPage,
+      isPackaged: window.electron?.isPackaged
+    });
+    
     // Check if we're in floating mode based on URL hash
     if (window.location.hash === '#/floating') {
       setIsFloatingMode(true);

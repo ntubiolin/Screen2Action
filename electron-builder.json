@@ -20,7 +20,7 @@
   ],
   "extraResources": [
     {
-      "from": "backend",
+      "from": "dist-backend",
       "to": "backend",
       "filter": [
         "**/*",

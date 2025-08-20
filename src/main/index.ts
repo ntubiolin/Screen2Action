@@ -6,20 +6,34 @@ import { ScreenshotManager } from './screenshot';
 import { getRecordingsDir } from './config';
 import { BackendManager } from './backend-manager';
 import { ConfigManager } from './config-manager';
+import { mainLogger } from './logger';
 
 // Enable live reload for Electron in development
-if (process.env.NODE_ENV !== 'production') {
-  // Path from dist/main to project root's node_modules
-  const electronPath = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'electron');
-  require('electron-reload')(path.join(__dirname, '..'), {
-    electron: electronPath,
-    hardResetMethod: 'exit'
-  });
+// Only load electron-reload in development and when not packaged
+if (process.env.NODE_ENV === 'development' && !app.isPackaged) {
+  try {
+    // Path from dist/main to project root's node_modules
+    const electronPath = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'electron');
+    require('electron-reload')(path.join(__dirname, '..'), {
+      electron: electronPath,
+      hardResetMethod: 'exit'
+    });
+  } catch (error) {
+    console.log('electron-reload not available in production');
+  }
 }
+
+// Log application startup
+mainLogger.info('Application starting', {
+  version: app.getVersion(),
+  platform: process.platform,
+  isPackaged: app.isPackaged,
+  appPath: app.getAppPath()
+});
 
 // Handle cleanup on process exit/restart
 process.on('SIGINT', async () => {
-  console.log('Received SIGINT, cleaning up...');
+  mainLogger.info('Received SIGINT, cleaning up...');
   if (wsServer) {
     await wsServer.stop();
     wsServer = null;
@@ -28,7 +42,7 @@ process.on('SIGINT', async () => {
 });
 
 process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM, cleaning up...');
+  mainLogger.info('Received SIGTERM, cleaning up...');
   if (wsServer) {
     await wsServer.stop();
     wsServer = null;
@@ -141,6 +155,25 @@ app.whenReady().then(async () => {
           label: 'Select All',
           accelerator: 'CmdOrCtrl+A',
           role: 'selectAll'
+        },
+        { type: 'separator' },
+        {
+          label: 'View Logs',
+          click: async () => {
+            const { shell } = require('electron');
+            const logPath = mainLogger.getLogPath();
+            mainLogger.info('Opening log file', { logPath });
+            shell.openPath(logPath);
+          }
+        },
+        {
+          label: 'Open Logs Folder',
+          click: async () => {
+            const { shell } = require('electron');
+            const logDir = path.dirname(mainLogger.getLogPath());
+            mainLogger.info('Opening logs folder', { logDir });
+            shell.openPath(logDir);
+          }
         }
       ]
     },
@@ -178,7 +211,6 @@ app.whenReady().then(async () => {
               webPreferences: {
                 preload: path.join(__dirname, '../preload/index.js'),
                 contextIsolation: true,
-                enableRemoteModule: false,
                 nodeIntegration: false,
               },
             });
@@ -243,6 +275,26 @@ app.whenReady().then(async () => {
   backendManager = new BackendManager();
   configManager = new ConfigManager();
   
+  // IPC handler to get logs
+  ipcMain.handle('get-logs', async () => {
+    const logPath = mainLogger.getLogPath();
+    mainLogger.info('Log path requested', { logPath });
+    return {
+      logPath,
+      logDir: path.dirname(logPath)
+    };
+  });
+
+  // IPC handler to open logs folder
+  ipcMain.handle('open-logs-folder', async () => {
+    const { shell } = require('electron');
+    const logPath = mainLogger.getLogPath();
+    const logDir = path.dirname(logPath);
+    mainLogger.info('Opening logs folder', { logDir });
+    shell.openPath(logDir);
+    return logDir;
+  });
+  
   // Start WebSocket server for Python backend communication
   try {
     const wsStarted = await wsServer.start(8765);
@@ -264,21 +316,34 @@ app.whenReady().then(async () => {
     );
   }
 
-  // Start Python backend in production
-  if (backendManager && (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV)) {
+  // Start Python backend (dev and prod). Allow opt-out with S2A_DISABLE_BACKEND=1
+  const disableBackend = process.env.S2A_DISABLE_BACKEND === '1';
+  const shouldStartBackend = !!backendManager && !disableBackend;
+  mainLogger.info('Backend startup decision', {
+    isPackaged: app.isPackaged,
+    NODE_ENV: process.env.NODE_ENV,
+    disableBackend,
+    shouldStartBackend
+  });
+  
+  if (shouldStartBackend) {
     try {
-      console.log('Starting Python backend...');
-      const backendStarted = await backendManager.startBackend();
+      mainLogger.info('Starting Python backend...');
+      const backendStarted = await backendManager!.startBackend();
       if (!backendStarted) {
-        console.error('Failed to start Python backend');
-        await backendManager.showBackendErrorDialog();
+        mainLogger.error('Failed to start Python backend');
+        await backendManager!.showBackendErrorDialog();
       } else {
-        console.log('Python backend started successfully');
+        mainLogger.info('Python backend started successfully');
       }
     } catch (error) {
-      console.error('Error starting Python backend:', error);
-      await backendManager.showBackendErrorDialog();
+      mainLogger.error('Error starting Python backend:', error);
+      await backendManager!.showBackendErrorDialog();
     }
+  } else {
+    mainLogger.info('Skipping backend startup', {
+      reason: disableBackend ? 'S2A_DISABLE_BACKEND=1' : 'No backend manager'
+    });
   }
   
   app.on('activate', () => {
@@ -371,6 +436,14 @@ ipcMain.handle('get-sources', async () => {
 ipcMain.handle('start-recording', async (_, screenId: string) => {
   if (recordingManager) {
     const sessionId = await recordingManager.startRecording(screenId);
+
+    // Switch main logger and backend-manager logger to session folder
+    try {
+      mainLogger.useSession(sessionId);
+    } catch {}
+    try {
+      backendManager?.setSession(sessionId);
+    } catch {}
     
     // Also start audio recording in Python backend
     if (wsServer) {
