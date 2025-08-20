@@ -51,8 +51,11 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   // Audio playback state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [isDraggingProgress, setIsDraggingProgress] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const progressBarRef = useRef<HTMLDivElement | null>(null);
   
   // MCP and AI Chat state
   const [mcpServers, setMcpServers] = useState<Array<any>>([]);
@@ -465,6 +468,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
       const nextParagraph = parsedNotes.find(n => n.timestamp > currentParagraph.timestamp);
       const endTime = nextParagraph ? nextParagraph.timestamp : currentParagraph.timestamp + 60000;
       const duration = endTime - currentParagraph.timestamp;
+      setAudioDuration(duration);
       
       audio.currentTime = currentParagraph.timestamp / 1000;
       await audio.play();
@@ -484,6 +488,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
             playbackTimerRef.current = null;
             setIsPlaying(false);
             setCurrentTime(0);
+            setAudioDuration(0);
           }
         }
       }, 100);
@@ -512,6 +517,20 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     }
     setIsPlaying(false);
     setCurrentTime(0);
+    setAudioDuration(0);
+  };
+
+  const handleSeekAudio = (progressPercent: number) => {
+    if (!audioRef.current || !currentParagraph) return;
+    
+    // Calculate the actual time within the paragraph
+    const nextParagraph = parsedNotes.find(n => n.timestamp > currentParagraph.timestamp);
+    const endTime = nextParagraph ? nextParagraph.timestamp : currentParagraph.timestamp + 60000;
+    const duration = endTime - currentParagraph.timestamp;
+    
+    const newTime = (currentParagraph.timestamp + (duration * progressPercent / 100)) / 1000;
+    audioRef.current.currentTime = newTime;
+    setCurrentTime((duration * progressPercent / 100));
   };
 
   const handleSendToAI = async () => {
@@ -818,41 +837,98 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                     </button>
 
                     {/* Audio Controls */}
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handlePlayAudio}
-                        disabled={!audioPath || !currentParagraph}
-                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
-                          audioPath && currentParagraph
-                            ? 'bg-green-600 hover:bg-green-700 text-white'
-                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                        }`}
-                      >
-                        <Play size={16} />
-                        <span>{isPlaying ? `${formatTimestamp(currentTime)}` : 'Play'}</span>
-                      </button>
-                      <button
-                        onClick={handlePauseAudio}
-                        disabled={!isPlaying}
-                        className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
-                          isPlaying
-                            ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                        }`}
-                      >
-                        <Pause size={16} />
-                      </button>
-                      <button
-                        onClick={handleStopAudio}
-                        disabled={!isPlaying && currentTime === 0}
-                        className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
-                          isPlaying || currentTime > 0
-                            ? 'bg-red-600 hover:bg-red-700 text-white'
-                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                        }`}
-                      >
-                        <Square size={16} />
-                      </button>
+                    <div className="space-y-3">
+                      {/* Progress Bar */}
+                      {(isPlaying || currentTime > 0) && audioDuration > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs text-gray-400">
+                            <span>{formatTimestamp(currentTime)}</span>
+                            <span>{formatTimestamp(audioDuration)}</span>
+                          </div>
+                          <div 
+                            ref={progressBarRef}
+                            className="relative h-2 bg-gray-700 rounded-full overflow-hidden cursor-pointer group"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setIsDraggingProgress(true);
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const x = e.clientX - rect.left;
+                              const percentage = (x / rect.width) * 100;
+                              handleSeekAudio(Math.max(0, Math.min(100, percentage)));
+                            }}
+                            onMouseMove={(e) => {
+                              if (isDraggingProgress) {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const x = e.clientX - rect.left;
+                                const percentage = (x / rect.width) * 100;
+                                handleSeekAudio(Math.max(0, Math.min(100, percentage)));
+                              }
+                            }}
+                            onMouseUp={() => {
+                              setIsDraggingProgress(false);
+                            }}
+                            onMouseLeave={() => {
+                              setIsDraggingProgress(false);
+                            }}
+                          >
+                            <div
+                              className="absolute left-0 top-0 h-full bg-blue-500 pointer-events-none"
+                              style={{ 
+                                width: `${audioDuration > 0 ? (currentTime / audioDuration) * 100 : 0}%`,
+                                transition: isDraggingProgress ? 'none' : 'width 100ms'
+                              }}
+                            />
+                            {/* Hover indicator */}
+                            <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 pointer-events-none" />
+                            {/* Drag handle - visible on hover or when dragging */}
+                            <div 
+                              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                              style={{ 
+                                left: `calc(${audioDuration > 0 ? (currentTime / audioDuration) * 100 : 0}% - 6px)`,
+                                opacity: isDraggingProgress ? 1 : undefined
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Control Buttons */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handlePlayAudio}
+                          disabled={!audioPath || !currentParagraph}
+                          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                            audioPath && currentParagraph
+                              ? 'bg-green-600 hover:bg-green-700 text-white'
+                              : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          <Play size={16} />
+                          <span>Play</span>
+                        </button>
+                        <button
+                          onClick={handlePauseAudio}
+                          disabled={!isPlaying}
+                          className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                            isPlaying
+                              ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                              : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          <Pause size={16} />
+                        </button>
+                        <button
+                          onClick={handleStopAudio}
+                          disabled={!isPlaying && currentTime === 0}
+                          className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                            isPlaying || currentTime > 0
+                              ? 'bg-red-600 hover:bg-red-700 text-white'
+                              : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          <Square size={16} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
