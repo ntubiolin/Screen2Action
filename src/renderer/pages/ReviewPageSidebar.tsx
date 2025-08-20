@@ -990,6 +990,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                       )}
                     </div>
                   </div>
+                </div>
 
                 {/* Second Resize Bar - Between MCP and Chat */}
                 <div
