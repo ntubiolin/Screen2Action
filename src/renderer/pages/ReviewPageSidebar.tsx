@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
-import { useRecordingStore } from '../store/recordingStore';
 import { 
   Camera, 
-  MessageSquare, 
   Play, 
   Pause,
   Square,
   Check,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
+  ChevronUp,
   Maximize2,
   Download
 } from 'lucide-react';
@@ -62,8 +62,8 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [selectedMcpServer, setSelectedMcpServer] = useState<string>('');
   const [mcpTools, setMcpTools] = useState<Array<any>>([]);
   const [selectedMcpTools, setSelectedMcpTools] = useState<Set<string>>(new Set());
+  const [mcpToolsExpanded, setMcpToolsExpanded] = useState(true);
   const [aiPrompt, setAiPrompt] = useState('');
-  const [aiResponse, setAiResponse] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{role: 'user' | 'assistant', content: string}>>([]);
   
@@ -72,7 +72,6 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const resizeRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [rootTop, setRootTop] = useState(0);
-  const { notes: storeNotes } = useRecordingStore();
 
   useEffect(() => {
     loadMarkdownFile();
@@ -203,7 +202,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     let sectionStartLine = 1;
     let isH1Section = false;
     
-    lines.forEach((line, index) => {
+    lines.forEach((line) => {
       if (headingRegex.test(line)) {
         if (currentSection.length > 0) {
           const content = currentSection.join('\n').trim();
@@ -566,12 +565,10 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
       }
       
       setChatHistory(prev => [...prev, { role: 'assistant', content: response }]);
-      setAiResponse(response);
     } catch (error) {
       console.error('AI processing failed:', error);
       const errorMsg = 'Error: Failed to process request';
       setChatHistory(prev => [...prev, { role: 'assistant', content: errorMsg }]);
-      setAiResponse(errorMsg);
     } finally {
       setIsProcessing(false);
     }
@@ -965,30 +962,62 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
 
                       {selectedMcpServer && mcpTools.length > 0 && (
                         <div>
-                          <label className="block text-sm text-gray-400 mb-1">
-                            Available Functions ({mcpTools.filter(t => selectedMcpTools.has(t.name)).length}/{mcpTools.length} selected)
-                          </label>
-                          <div className="max-h-24 overflow-y-auto bg-gray-900 rounded p-2 space-y-1">
-                            {mcpTools.map((tool: any) => (
-                              <label key={tool.name} className="flex items-center text-sm text-gray-300 cursor-pointer hover:text-white">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedMcpTools.has(tool.name)}
-                                  onChange={(e) => {
-                                    const newSelected = new Set(selectedMcpTools);
-                                    if (e.target.checked) {
-                                      newSelected.add(tool.name);
-                                    } else {
-                                      newSelected.delete(tool.name);
-                                    }
-                                    setSelectedMcpTools(newSelected);
-                                  }}
-                                  className="mr-2"
-                                />
-                                {tool.name}
-                              </label>
-                            ))}
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-sm text-gray-400">
+                              Available Functions ({mcpTools.filter(t => selectedMcpTools.has(t.name)).length}/{mcpTools.length} selected)
+                            </label>
+                            <button
+                              onClick={() => setMcpToolsExpanded(!mcpToolsExpanded)}
+                              className="text-gray-400 hover:text-white transition-colors"
+                              title={mcpToolsExpanded ? 'Collapse' : 'Expand'}
+                            >
+                              {mcpToolsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </button>
                           </div>
+                          
+                          {mcpToolsExpanded && (
+                            <>
+                              <div className="flex gap-2 mb-2">
+                                <button
+                                  onClick={() => {
+                                    const allTools = new Set(mcpTools.map((t: any) => t.name));
+                                    setSelectedMcpTools(allTools);
+                                  }}
+                                  className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-xs text-gray-300 rounded transition-colors"
+                                >
+                                  Select All
+                                </button>
+                                <button
+                                  onClick={() => setSelectedMcpTools(new Set())}
+                                  className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-xs text-gray-300 rounded transition-colors"
+                                >
+                                  Select None
+                                </button>
+                              </div>
+                              
+                              <div className="max-h-24 overflow-y-auto bg-gray-900 rounded p-2 space-y-1">
+                                {mcpTools.map((tool: any) => (
+                                  <label key={tool.name} className="flex items-center text-sm text-gray-300 cursor-pointer hover:text-white">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedMcpTools.has(tool.name)}
+                                      onChange={(e) => {
+                                        const newSelected = new Set(selectedMcpTools);
+                                        if (e.target.checked) {
+                                          newSelected.add(tool.name);
+                                        } else {
+                                          newSelected.delete(tool.name);
+                                        }
+                                        setSelectedMcpTools(newSelected);
+                                      }}
+                                      className="mr-2"
+                                    />
+                                    {tool.name}
+                                  </label>
+                                ))}
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
