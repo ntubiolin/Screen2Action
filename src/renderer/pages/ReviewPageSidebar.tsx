@@ -1,16 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
-import { useRecordingStore } from '../store/recordingStore';
 import { 
   Camera, 
-  MessageSquare, 
   Play, 
   Pause,
   Square,
   Check,
   ChevronRight,
   ChevronLeft,
-  Maximize2
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Download
 } from 'lucide-react';
 
 interface ReviewPageSidebarProps {
@@ -39,7 +40,16 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentParagraph, setCurrentParagraph] = useState<ParsedNote | null>(null);
   const [cursorLine, setCursorLine] = useState(1);
-  const [upperSectionHeight, setUpperSectionHeight] = useState(50); // percentage
+  const [sectionHeights, setSectionHeights] = useState({
+    screenshots: 35,
+    mcp: 30,
+    chat: 35,
+  });
+  // Keep a ref in sync with latest heights to avoid stale closures in mouse handlers
+  const sectionHeightsRef = useRef(sectionHeights);
+  useEffect(() => {
+    sectionHeightsRef.current = sectionHeights;
+  }, [sectionHeights]);
   
   // Screenshot related state
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
@@ -50,29 +60,58 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   // Audio playback state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [isDraggingProgress, setIsDraggingProgress] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const progressBarRef = useRef<HTMLDivElement | null>(null);
   
   // MCP and AI Chat state
   const [mcpServers, setMcpServers] = useState<Array<any>>([]);
   const [selectedMcpServer, setSelectedMcpServer] = useState<string>('');
   const [mcpTools, setMcpTools] = useState<Array<any>>([]);
   const [selectedMcpTools, setSelectedMcpTools] = useState<Set<string>>(new Set());
+  const [mcpToolsExpanded, setMcpToolsExpanded] = useState(true);
   const [aiPrompt, setAiPrompt] = useState('');
-  const [aiResponse, setAiResponse] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{role: 'user' | 'assistant', content: string}>>([]);
   
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
-  const resizeRef = useRef<HTMLDivElement>(null);
-  const { notes: storeNotes } = useRecordingStore();
+  const resizeRef1 = useRef<HTMLDivElement>(null); // Between screenshots and MCP
+  const resizeRef2 = useRef<HTMLDivElement>(null); // Between MCP and chat
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [rootTop, setRootTop] = useState(0);
+
+  // Refs to manage drag state to avoid re-renders breaking the drag handlers
+  const isResizing1Ref = useRef(false);
+  const isResizing2Ref = useRef(false);
+  const startYRef = useRef(0);
+  const startHeightsRef = useRef(sectionHeights);
 
   useEffect(() => {
     loadMarkdownFile();
     loadAudioPath();
     loadMcpServers();
   }, [sessionId]);
+
+  // Measure top offset so the fixed sidebar aligns with the screen's right edge but starts below the page header
+  useEffect(() => {
+    const measure = () => {
+      if (rootRef.current) {
+        const rect = rootRef.current.getBoundingClientRect();
+        setRootTop(Math.max(0, Math.floor(rect.top)));
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    // If layout might shift after fonts/Monaco load
+    const t = setTimeout(measure, 100);
+    return () => {
+      window.removeEventListener('resize', measure);
+      clearTimeout(t);
+    };
+  }, []);
 
   // Load markdown file
   const loadMarkdownFile = async () => {
@@ -179,7 +218,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     let sectionStartLine = 1;
     let isH1Section = false;
     
-    lines.forEach((line, index) => {
+    lines.forEach((line) => {
       if (headingRegex.test(line)) {
         if (currentSection.length > 0) {
           const content = currentSection.join('\n').trim();
@@ -444,6 +483,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
       const nextParagraph = parsedNotes.find(n => n.timestamp > currentParagraph.timestamp);
       const endTime = nextParagraph ? nextParagraph.timestamp : currentParagraph.timestamp + 60000;
       const duration = endTime - currentParagraph.timestamp;
+      setAudioDuration(duration);
       
       audio.currentTime = currentParagraph.timestamp / 1000;
       await audio.play();
@@ -463,6 +503,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
             playbackTimerRef.current = null;
             setIsPlaying(false);
             setCurrentTime(0);
+            setAudioDuration(0);
           }
         }
       }, 100);
@@ -491,6 +532,20 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     }
     setIsPlaying(false);
     setCurrentTime(0);
+    setAudioDuration(0);
+  };
+
+  const handleSeekAudio = (progressPercent: number) => {
+    if (!audioRef.current || !currentParagraph) return;
+    
+    // Calculate the actual time within the paragraph
+    const nextParagraph = parsedNotes.find(n => n.timestamp > currentParagraph.timestamp);
+    const endTime = nextParagraph ? nextParagraph.timestamp : currentParagraph.timestamp + 60000;
+    const duration = endTime - currentParagraph.timestamp;
+    
+    const newTime = (currentParagraph.timestamp + (duration * progressPercent / 100)) / 1000;
+    audioRef.current.currentTime = newTime;
+    setCurrentTime((duration * progressPercent / 100));
   };
 
   const handleSendToAI = async () => {
@@ -526,12 +581,10 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
       }
       
       setChatHistory(prev => [...prev, { role: 'assistant', content: response }]);
-      setAiResponse(response);
     } catch (error) {
       console.error('AI processing failed:', error);
       const errorMsg = 'Error: Failed to process request';
       setChatHistory(prev => [...prev, { role: 'assistant', content: errorMsg }]);
-      setAiResponse(errorMsg);
     } finally {
       setIsProcessing(false);
     }
@@ -550,51 +603,118 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Handle resize
+  const handleExportMarkdown = async () => {
+    try {
+      // Create a blob with the markdown content
+      const blob = new Blob([markdownContent], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create a download link and click it
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `session_${sessionId}_notes.md`;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to export markdown:', error);
+    }
+  };
+
+  // Handle resize for both dividers (stable listeners; do not depend on sectionHeights)
   useEffect(() => {
-    if (!resizeRef.current) return;
-    
-    let isResizing = false;
-    let startY = 0;
-    let startHeight = upperSectionHeight;
-    
-    const handleMouseDown = (e: MouseEvent) => {
-      isResizing = true;
-      startY = e.clientY;
-      startHeight = upperSectionHeight;
+    const resizeBar1 = resizeRef1.current;
+    const resizeBar2 = resizeRef2.current;
+    if (!resizeBar1 || !resizeBar2) {
+      // If bars aren't mounted (e.g., no current paragraph), skip binding
+      return;
+    }
+
+    const handleMouseDown1 = (e: MouseEvent) => {
+      isResizing1Ref.current = true;
+      isResizing2Ref.current = false;
+      startYRef.current = e.clientY;
+      startHeightsRef.current = { ...sectionHeightsRef.current };
       document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
       e.preventDefault();
     };
-    
+
+    const handleMouseDown2 = (e: MouseEvent) => {
+      isResizing2Ref.current = true;
+      isResizing1Ref.current = false;
+      startYRef.current = e.clientY;
+      startHeightsRef.current = { ...sectionHeightsRef.current };
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      
-      const deltaY = e.clientY - startY;
-      const containerHeight = resizeRef.current?.parentElement?.clientHeight || 600;
+      if (!isResizing1Ref.current && !isResizing2Ref.current) return;
+
+      const deltaY = e.clientY - startYRef.current;
+      const containerHeight = resizeRef1.current?.parentElement?.clientHeight || 600;
       const deltaPercent = (deltaY / containerHeight) * 100;
-      const newHeight = Math.min(80, Math.max(20, startHeight + deltaPercent));
-      setUpperSectionHeight(newHeight);
+
+      if (isResizing1Ref.current) {
+        // Resizing between screenshots and MCP
+        const start = startHeightsRef.current;
+        const newScreenshotsHeight = Math.min(70, Math.max(10, start.screenshots + deltaPercent));
+        const totalRemainder = 100 - newScreenshotsHeight;
+        const mcpRatio = start.mcp / (start.mcp + start.chat || 1);
+        const tentativeMcp = totalRemainder * mcpRatio;
+        const newMcpHeight = Math.min(60, Math.max(10, tentativeMcp));
+        const newChatHeight = Math.max(10, totalRemainder - newMcpHeight);
+
+        setSectionHeights({
+          screenshots: newScreenshotsHeight,
+          mcp: newMcpHeight,
+          chat: newChatHeight,
+        });
+      } else if (isResizing2Ref.current) {
+        // Resizing between MCP and chat
+        const start = startHeightsRef.current;
+        const screenshotsHeight = start.screenshots;
+        const totalForMcpAndChat = 100 - screenshotsHeight;
+        const newMcpHeight = Math.min(60, Math.max(10, start.mcp + deltaPercent));
+        const newChatHeight = Math.max(10, totalForMcpAndChat - newMcpHeight);
+
+        setSectionHeights({
+          screenshots: screenshotsHeight,
+          mcp: newMcpHeight,
+          chat: newChatHeight,
+        });
+      }
     };
-    
+
     const handleMouseUp = () => {
-      isResizing = false;
+      if (!isResizing1Ref.current && !isResizing2Ref.current) return;
+      isResizing1Ref.current = false;
+      isResizing2Ref.current = false;
       document.body.style.cursor = 'default';
+      document.body.style.userSelect = '';
     };
-    
-    const resizeBar = resizeRef.current;
-    resizeBar.addEventListener('mousedown', handleMouseDown);
+
+    resizeBar1.addEventListener('mousedown', handleMouseDown1);
+    resizeBar2.addEventListener('mousedown', handleMouseDown2);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    
+
     return () => {
-      resizeBar.removeEventListener('mousedown', handleMouseDown);
+      resizeBar1.removeEventListener('mousedown', handleMouseDown1);
+      resizeBar2.removeEventListener('mousedown', handleMouseDown2);
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [upperSectionHeight]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarOpen, currentParagraph]);
 
   return (
-    <div className="h-full flex bg-gray-900">
+    <div ref={rootRef} className="h-full flex bg-gray-900 relative">
       <style>{`
         .current-paragraph-highlight {
           background-color: rgba(59, 130, 246, 0.1);
@@ -607,10 +727,37 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
         .monaco-editor .view-line.current-paragraph-highlight {
           background-color: rgba(59, 130, 246, 0.05);
         }
+        .resize-bar {
+          position: relative;
+          height: 4px;
+          background: linear-gradient(to bottom, #374151, #1f2937);
+          cursor: ns-resize;
+          transition: all 0.2s ease;
+          z-index: 10;
+        }
+        .resize-bar:hover {
+          background: linear-gradient(to bottom, #3b82f6, #2563eb);
+          height: 6px;
+          margin: -1px 0;
+        }
+        .resize-bar::before {
+          content: '';
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: 30px;
+          height: 2px;
+          background: rgba(255, 255, 255, 0.3);
+          border-radius: 1px;
+        }
+        .resize-bar:hover::before {
+          background: rgba(255, 255, 255, 0.6);
+        }
       `}</style>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Header */}
         <div className="bg-gray-800 p-4 border-b border-gray-700">
           <div className="flex justify-between items-center">
@@ -618,13 +765,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
               <h1 className="text-xl font-semibold text-white">Review Session</h1>
               <p className="text-sm text-gray-400 mt-1">Session ID: {sessionId}</p>
             </div>
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="text-gray-400 hover:text-white p-2 rounded hover:bg-gray-700 transition-colors"
-              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            >
-              {sidebarOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-            </button>
+            {/* Toggle button moved to a floating control to ensure visibility */}
           </div>
         </div>
 
@@ -655,279 +796,410 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
         </div>
       </div>
 
+      {/* Floating single toggle button (always visible) */}
+      <div
+        className="fixed z-40 transition-all duration-200 ease-out"
+        style={{ top: rootTop + 12, right: `calc(${sidebarOpen ? '24rem' : '0px'} + 8px)` }}
+      >
+        <button
+          onClick={() => setSidebarOpen(prev => !prev)}
+          className="text-gray-200 bg-gray-800/90 hover:bg-gray-700 border border-gray-700 rounded p-2 shadow-md transition-colors"
+          title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+        >
+          {sidebarOpen ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+        </button>
+      </div>
+
       {/* Sidebar */}
-      {sidebarOpen && (
-        <div className="w-96 bg-gray-800 border-l border-gray-700 flex flex-col">
-          {/* Sidebar Header */}
-          <div className="p-4 border-b border-gray-700">
-            <h2 className="text-lg font-semibold text-white">
-              {currentParagraph ? (
-                <>
-                  Paragraph at Line {currentParagraph.lineNumber}
-                  {currentParagraph.timestamp > 0 && (
-                    <span className="text-sm text-gray-400 ml-2">
-                      [{formatTimestamp(currentParagraph.timestamp)}]
-                    </span>
-                  )}
-                </>
-              ) : (
-                'No paragraph selected'
-              )}
-            </h2>
-          </div>
-
-          {currentParagraph && (
-            <>
-              {/* Upper Section - Screenshots and Audio Controls */}
-              <div 
-                className="flex flex-col"
-                style={{ height: `${upperSectionHeight}%` }}
-              >
-                {/* Time Range Display */}
-                <div className="px-4 py-2 bg-gray-900 text-sm text-gray-400">
-                  Time range: {formatTimestamp(currentParagraph.timestamp)} - {
-                    (() => {
-                      const next = parsedNotes.find(n => n.timestamp > currentParagraph.timestamp);
-                      return next ? formatTimestamp(next.timestamp) : 'End';
-                    })()
-                  }
-                </div>
-
-                {/* Screenshots Gallery */}
-                <div className="flex-1 overflow-y-auto p-4">
-                  {loadingScreenshots ? (
-                    <div className="text-center text-gray-400 py-8">Loading screenshots...</div>
-                  ) : screenshots.length > 0 ? (
-                    <div className="space-y-4">
-                      <div className="text-sm text-gray-400">
-                        Click to select, double-click to preview:
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {screenshots.map((screenshot, index) => (
-                          <div
-                            key={index}
-                            className="relative cursor-pointer group"
-                            onClick={() => toggleScreenshotSelection(index)}
-                            onDoubleClick={() => setPreviewScreenshot(screenshot.path)}
-                          >
-                            <img
-                              src={`file://${screenshot.path}`}
-                              alt={`Screenshot at ${formatTimestamp(screenshot.timestamp)}`}
-                              className={`w-full h-20 object-cover rounded border-2 transition-all ${
-                                selectedScreenshots.has(index)
-                                  ? 'border-blue-500 ring-2 ring-blue-400'
-                                  : 'border-gray-600 hover:border-gray-500'
-                              }`}
-                            />
-                            {selectedScreenshots.has(index) && (
-                              <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-0.5">
-                                <Check size={12} className="text-white" />
-                              </div>
-                            )}
-                            <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 text-center">
-                              {formatTimestamp(screenshot.timestamp - currentParagraph.timestamp)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+      <div
+        className="fixed right-0 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden transition-all duration-200 ease-out z-30"
+        style={{ top: rootTop, height: `calc(100vh - ${rootTop}px)`, width: sidebarOpen ? '24rem' : '0px', willChange: 'width' }}
+      >
+        {sidebarOpen && (
+          <>
+            {/* Sidebar Header */}
+            <div className="p-4 border-b border-gray-700">
+              <div className="flex justify-between items-start">
+                <h2 className="text-lg font-semibold text-white">
+                  {currentParagraph ? (
+                    <>
+                      Paragraph at Line {currentParagraph.lineNumber}
+                      {currentParagraph.timestamp > 0 && (
+                        <span className="text-sm text-gray-400 ml-2">
+                          [{formatTimestamp(currentParagraph.timestamp)}]
+                        </span>
+                      )}
+                    </>
                   ) : (
-                    <div className="text-center text-gray-500 py-8">
-                      No screenshots available for this section
-                    </div>
+                    'No paragraph selected'
                   )}
-                </div>
-
-                {/* Action Buttons */}
-                <div className="p-4 border-t border-gray-700 space-y-2">
-                  <button
-                    onClick={handleInsertScreenshot}
-                    disabled={selectedScreenshots.size === 0}
-                    className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
-                      selectedScreenshots.size > 0
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                    }`}
-                  >
-                    <Camera size={16} />
-                    <span>Insert {selectedScreenshots.size || ''} Screenshot{selectedScreenshots.size !== 1 ? 's' : ''}</span>
-                  </button>
-
-                  {/* Audio Controls */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handlePlayAudio}
-                      disabled={!audioPath || !currentParagraph}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
-                        audioPath && currentParagraph
-                          ? 'bg-green-600 hover:bg-green-700 text-white'
-                          : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      <Play size={16} />
-                      <span>{isPlaying ? `${formatTimestamp(currentTime)}` : 'Play'}</span>
-                    </button>
-                    <button
-                      onClick={handlePauseAudio}
-                      disabled={!isPlaying}
-                      className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
-                        isPlaying
-                          ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                          : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      <Pause size={16} />
-                    </button>
-                    <button
-                      onClick={handleStopAudio}
-                      disabled={!isPlaying && currentTime === 0}
-                      className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
-                        isPlaying || currentTime > 0
-                          ? 'bg-red-600 hover:bg-red-700 text-white'
-                          : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      <Square size={16} />
-                    </button>
-                  </div>
-                </div>
+                </h2>
+                <button
+                  onClick={handleExportMarkdown}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors"
+                  title="Export markdown"
+                >
+                  <Download size={14} />
+                  <span>Export</span>
+                </button>
               </div>
+            </div>
 
-              {/* Resize Bar */}
-              <div
-                ref={resizeRef}
-                className="h-1 bg-gray-700 hover:bg-gray-600 cursor-ns-resize transition-colors"
-              />
+            {currentParagraph && (
+              <>
+                {/* Screenshots and Audio Controls Section */}
+                <div 
+                  className="flex flex-col overflow-hidden"
+                  style={{ height: `${sectionHeights.screenshots}%` }}
+                >
+                  {/* Time Range Display */}
+                  <div className="px-4 py-2 bg-gray-900 text-sm text-gray-400">
+                    Time range: {formatTimestamp(currentParagraph.timestamp)} - {
+                      (() => {
+                        const next = parsedNotes.find(n => n.timestamp > currentParagraph.timestamp);
+                        return next ? formatTimestamp(next.timestamp) : 'End';
+                      })()
+                    }
+                  </div>
 
-              {/* Lower Section - MCP Settings and LLM Chat */}
-              <div 
-                className="flex flex-col"
-                style={{ height: `${100 - upperSectionHeight}%` }}
-              >
-                {/* MCP Settings */}
-                <div className="p-4 border-b border-gray-700">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1">MCP Server</label>
-                      <select
-                        value={selectedMcpServer}
-                        onChange={(e) => setSelectedMcpServer(e.target.value)}
-                        className="w-full bg-gray-700 text-white px-3 py-1.5 rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
-                      >
-                        <option value="">Standard AI (No MCP)</option>
-                        {mcpServers.map((server: any) => (
-                          <option key={server.name} value={server.name}>
-                            {server.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {selectedMcpServer && mcpTools.length > 0 && (
-                      <div>
-                        <label className="block text-sm text-gray-400 mb-1">
-                          Available Functions ({mcpTools.filter(t => selectedMcpTools.has(t.name)).length}/{mcpTools.length} selected)
-                        </label>
-                        <div className="max-h-24 overflow-y-auto bg-gray-900 rounded p-2 space-y-1">
-                          {mcpTools.map((tool: any) => (
-                            <label key={tool.name} className="flex items-center text-sm text-gray-300 cursor-pointer hover:text-white">
-                              <input
-                                type="checkbox"
-                                checked={selectedMcpTools.has(tool.name)}
-                                onChange={(e) => {
-                                  const newSelected = new Set(selectedMcpTools);
-                                  if (e.target.checked) {
-                                    newSelected.add(tool.name);
-                                  } else {
-                                    newSelected.delete(tool.name);
-                                  }
-                                  setSelectedMcpTools(newSelected);
-                                }}
-                                className="mr-2"
+                  {/* Screenshots Gallery */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {loadingScreenshots ? (
+                      <div className="text-center text-gray-400 py-8">Loading screenshots...</div>
+                    ) : screenshots.length > 0 ? (
+                      <div className="space-y-4">
+                        <div className="text-sm text-gray-400">
+                          Click to select, double-click to preview:
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {screenshots.map((screenshot, index) => (
+                            <div
+                              key={index}
+                              className="relative cursor-pointer group"
+                              onClick={() => toggleScreenshotSelection(index)}
+                              onDoubleClick={() => setPreviewScreenshot(screenshot.path)}
+                            >
+                              <img
+                                src={`file://${screenshot.path}`}
+                                alt={`Screenshot at ${formatTimestamp(screenshot.timestamp)}`}
+                                className={`w-full h-20 object-cover rounded border-2 transition-all ${
+                                  selectedScreenshots.has(index)
+                                    ? 'border-blue-500 ring-2 ring-blue-400'
+                                    : 'border-gray-600 hover:border-gray-500'
+                                }`}
                               />
-                              {tool.name}
-                            </label>
+                              {selectedScreenshots.has(index) && (
+                                <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-0.5">
+                                  <Check size={12} className="text-white" />
+                                </div>
+                              )}
+                              <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 text-center">
+                                {formatTimestamp(screenshot.timestamp - currentParagraph.timestamp)}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       </div>
+                    ) : (
+                      <div className="text-center text-gray-500 py-8">
+                        No screenshots available for this section
+                      </div>
                     )}
                   </div>
-                </div>
 
-                {/* Chat History */}
-                <div className="flex-1 overflow-y-auto p-4">
-                  {chatHistory.length > 0 ? (
+                  {/* Action Buttons */}
+                  <div className="p-4 border-t border-gray-700 space-y-2">
+                    <button
+                      onClick={handleInsertScreenshot}
+                      disabled={selectedScreenshots.size === 0}
+                      className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                        selectedScreenshots.size > 0
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                          : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      <Camera size={16} />
+                      <span>Insert {selectedScreenshots.size || ''} Screenshot{selectedScreenshots.size !== 1 ? 's' : ''}</span>
+                    </button>
+
+                    {/* Audio Controls */}
                     <div className="space-y-3">
-                      {chatHistory.map((msg, index) => (
-                        <div key={index} className={`${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                          <div className={`inline-block max-w-[80%] p-3 rounded-lg ${
-                            msg.role === 'user' 
-                              ? 'bg-blue-600 text-white' 
-                              : 'bg-gray-700 text-gray-100'
-                          }`}>
-                            <div className="text-xs opacity-75 mb-1">
-                              {msg.role === 'user' ? 'You' : 'AI'}
-                            </div>
-                            <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
+                      {/* Progress Bar */}
+                      {(isPlaying || currentTime > 0) && audioDuration > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs text-gray-400">
+                            <span>{formatTimestamp(currentTime)}</span>
+                            <span>{formatTimestamp(audioDuration)}</span>
                           </div>
-                        </div>
-                      ))}
-                      {isProcessing && (
-                        <div className="text-left">
-                          <div className="inline-block bg-gray-700 text-gray-100 p-3 rounded-lg">
-                            <div className="text-sm">Processing...</div>
+                          <div 
+                            ref={progressBarRef}
+                            className="relative h-2 bg-gray-700 rounded-full overflow-hidden cursor-pointer group"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setIsDraggingProgress(true);
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const x = e.clientX - rect.left;
+                              const percentage = (x / rect.width) * 100;
+                              handleSeekAudio(Math.max(0, Math.min(100, percentage)));
+                            }}
+                            onMouseMove={(e) => {
+                              if (isDraggingProgress) {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const x = e.clientX - rect.left;
+                                const percentage = (x / rect.width) * 100;
+                                handleSeekAudio(Math.max(0, Math.min(100, percentage)));
+                              }
+                            }}
+                            onMouseUp={() => {
+                              setIsDraggingProgress(false);
+                            }}
+                            onMouseLeave={() => {
+                              setIsDraggingProgress(false);
+                            }}
+                          >
+                            <div
+                              className="absolute left-0 top-0 h-full bg-blue-500 pointer-events-none"
+                              style={{ 
+                                width: `${audioDuration > 0 ? (currentTime / audioDuration) * 100 : 0}%`,
+                                transition: isDraggingProgress ? 'none' : 'width 100ms'
+                              }}
+                            />
+                            {/* Hover indicator */}
+                            <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 pointer-events-none" />
+                            {/* Drag handle - visible on hover or when dragging */}
+                            <div 
+                              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                              style={{ 
+                                left: `calc(${audioDuration > 0 ? (currentTime / audioDuration) * 100 : 0}% - 6px)`,
+                                opacity: isDraggingProgress ? 1 : undefined
+                              }}
+                            />
                           </div>
                         </div>
                       )}
+                      
+                      {/* Control Buttons */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handlePlayAudio}
+                          disabled={!audioPath || !currentParagraph}
+                          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                            audioPath && currentParagraph
+                              ? 'bg-green-600 hover:bg-green-700 text-white'
+                              : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          <Play size={16} />
+                          <span>Play</span>
+                        </button>
+                        <button
+                          onClick={handlePauseAudio}
+                          disabled={!isPlaying}
+                          className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                            isPlaying
+                              ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                              : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          <Pause size={16} />
+                        </button>
+                        <button
+                          onClick={handleStopAudio}
+                          disabled={!isPlaying && currentTime === 0}
+                          className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
+                            isPlaying || currentTime > 0
+                              ? 'bg-red-600 hover:bg-red-700 text-white'
+                              : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                          }`}
+                        >
+                          <Square size={16} />
+                        </button>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="text-center text-gray-500 py-8">
-                      Start a conversation about this paragraph
-                    </div>
-                  )}
-                </div>
-
-                {/* Input Area */}
-                <div className="p-4 border-t border-gray-700">
-                  <div className="flex gap-2">
-                    <textarea
-                      value={aiPrompt}
-                      onChange={(e) => setAiPrompt(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendToAI();
-                        }
-                      }}
-                      placeholder="Ask about this paragraph..."
-                      className="flex-1 bg-gray-700 text-white px-3 py-2 rounded border border-gray-600 focus:border-blue-500 focus:outline-none resize-none text-sm"
-                      rows={2}
-                      disabled={isProcessing || !currentParagraph}
-                    />
                   </div>
-                  <button
-                    onClick={handleSendToAI}
-                    disabled={isProcessing || !aiPrompt.trim() || !currentParagraph}
-                    className={`mt-2 w-full px-4 py-2 rounded font-medium transition-colors text-sm ${
-                      isProcessing || !aiPrompt.trim() || !currentParagraph
-                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
-                  >
-                    {isProcessing ? 'Processing...' : 'Send'}
-                  </button>
                 </div>
-              </div>
-            </>
-          )}
 
-          {!currentParagraph && (
-            <div className="flex-1 flex items-center justify-center text-gray-500">
-              Move cursor to a paragraph to view details
-            </div>
-          )}
-        </div>
-      )}
+                {/* First Resize Bar - Between Screenshots and MCP */}
+                <div
+                  ref={resizeRef1}
+                  className="resize-bar"
+                  title="Drag to resize sections"
+                />
+
+                {/* MCP Settings Section */}
+                <div 
+                  className="flex flex-col overflow-hidden"
+                  style={{ height: `${sectionHeights.mcp}%` }}
+                >
+                  <div className="p-4 h-full overflow-y-auto">
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-1">MCP Server</label>
+                        <select
+                          value={selectedMcpServer}
+                          onChange={(e) => setSelectedMcpServer(e.target.value)}
+                          className="w-full bg-gray-700 text-white px-3 py-1.5 rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
+                        >
+                          <option value="">Standard AI (No MCP)</option>
+                          {mcpServers.map((server: any) => (
+                            <option key={server.name} value={server.name}>
+                              {server.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {selectedMcpServer && mcpTools.length > 0 && (
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-sm text-gray-400">
+                              Available Functions ({mcpTools.filter(t => selectedMcpTools.has(t.name)).length}/{mcpTools.length} selected)
+                            </label>
+                            <button
+                              onClick={() => setMcpToolsExpanded(!mcpToolsExpanded)}
+                              className="text-gray-400 hover:text-white transition-colors"
+                              title={mcpToolsExpanded ? 'Collapse' : 'Expand'}
+                            >
+                              {mcpToolsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </button>
+                          </div>
+                          
+                          {mcpToolsExpanded && (
+                            <>
+                              <div className="flex gap-2 mb-2">
+                                <button
+                                  onClick={() => {
+                                    const allTools = new Set(mcpTools.map((t: any) => t.name));
+                                    setSelectedMcpTools(allTools);
+                                  }}
+                                  className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-xs text-gray-300 rounded transition-colors"
+                                >
+                                  Select All
+                                </button>
+                                <button
+                                  onClick={() => setSelectedMcpTools(new Set())}
+                                  className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-xs text-gray-300 rounded transition-colors"
+                                >
+                                  Select None
+                                </button>
+                              </div>
+                              
+                              <div className="max-h-24 overflow-y-auto bg-gray-900 rounded p-2 space-y-1">
+                                {mcpTools.map((tool: any) => (
+                                  <label key={tool.name} className="flex items-center text-sm text-gray-300 cursor-pointer hover:text-white">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedMcpTools.has(tool.name)}
+                                      onChange={(e) => {
+                                        const newSelected = new Set(selectedMcpTools);
+                                        if (e.target.checked) {
+                                          newSelected.add(tool.name);
+                                        } else {
+                                          newSelected.delete(tool.name);
+                                        }
+                                        setSelectedMcpTools(newSelected);
+                                      }}
+                                      className="mr-2"
+                                    />
+                                    {tool.name}
+                                  </label>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Second Resize Bar - Between MCP and Chat */}
+                <div
+                  ref={resizeRef2}
+                  className="resize-bar"
+                  title="Drag to resize sections"
+                />
+
+                {/* Chat Section */}
+                <div 
+                  className="flex flex-col overflow-hidden"
+                  style={{ height: `${sectionHeights.chat}%` }}
+                >
+                  {/* Chat History */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {chatHistory.length > 0 ? (
+                      <div className="space-y-3">
+                        {chatHistory.map((msg, index) => (
+                          <div key={index} className={`${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                            <div className={`inline-block max-w-[80%] p-3 rounded-lg ${
+                              msg.role === 'user' 
+                                ? 'bg-blue-600 text-white' 
+                                : 'bg-gray-700 text-gray-100'
+                            }`}>
+                              <div className="text-xs opacity-75 mb-1">
+                                {msg.role === 'user' ? 'You' : 'AI'}
+                              </div>
+                              <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
+                            </div>
+                          </div>
+                        ))}
+                        {isProcessing && (
+                          <div className="text-left">
+                            <div className="inline-block bg-gray-700 text-gray-100 p-3 rounded-lg">
+                              <div className="text-sm">Processing...</div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center text-gray-500 py-8">
+                        Start a conversation about this paragraph
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Input Area */}
+                  <div className="p-4 border-t border-gray-700">
+                    <div className="flex gap-2">
+                      <textarea
+                        value={aiPrompt}
+                        onChange={(e) => setAiPrompt(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendToAI();
+                          }
+                        }}
+                        placeholder="Ask about this paragraph..."
+                        className="flex-1 bg-gray-700 text-white px-3 py-2 rounded border border-gray-600 focus:border-blue-500 focus:outline-none resize-none text-sm"
+                        rows={2}
+                        disabled={isProcessing || !currentParagraph}
+                      />
+                    </div>
+                    <button
+                      onClick={handleSendToAI}
+                      disabled={isProcessing || !aiPrompt.trim() || !currentParagraph}
+                      className={`mt-2 w-full px-4 py-2 rounded font-medium transition-colors text-sm ${
+                        isProcessing || !aiPrompt.trim() || !currentParagraph
+                          ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                          : 'bg-blue-600 hover:bg-blue-700 text-white'
+                      }`}
+                    >
+                      {isProcessing ? 'Processing...' : 'Send'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {!currentParagraph && (
+              <div className="flex-1 flex items-center justify-center text-gray-500">
+                Move cursor to a paragraph to view details
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Screenshot Preview Modal */}
       {previewScreenshot && (

@@ -64,6 +64,13 @@ class MCPService:
             for name, handler in self.tools.items()
         }
     
+    def prepare_session(self, session_id: Optional[str]) -> None:
+        """Prepare mcp-use to use a session-specific directory (or latest session when None)."""
+        try:
+            self.mcp_client.prepare_for_session(session_id)
+        except Exception as e:
+            logger.warning(f"prepare_session failed: {e}")
+    
     # Built-in tool implementations
     
     def _file_read(self, params: Dict[str, Any]) -> str:
@@ -177,9 +184,9 @@ class MCPService:
         """Get list of available MCP servers."""
         return self.mcp_client.get_server_info()
     
-    async def activate_mcp_server(self, server_name: str) -> bool:
+    async def activate_mcp_server(self, server_name: str, session_id: Optional[str] = None) -> bool:
         """Activate a specific MCP server."""
-        return await self.mcp_client.activate_server(server_name)
+        return await self.mcp_client.activate_server(server_name, session_id)
     
     async def deactivate_mcp_server(self):
         """Deactivate the currently active MCP server."""

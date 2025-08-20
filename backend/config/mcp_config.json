@@ -2,15 +2,27 @@
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "stdio"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/linyusheng/Documents/Screen2Action/recordings"
+      ]
     },
     "memory": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory", "stdio"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory",
+        "stdio"
+      ]
     },
     "puppeteer": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-puppeteer", "stdio"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer",
+        "stdio"
+      ]
     }
   }
 }
