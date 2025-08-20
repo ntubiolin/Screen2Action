@@ -47,7 +47,7 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 - **Frontend**: Electron + React + TypeScript
 - **Backend**: Python + FastAPI
 - **Communication**: WebSocket
-- **AI**: OpenAI API / Anthropic Claude API
+- **AI**: OpenAI API / Azure OpenAI / Anthropic Claude API
 - **Media Processing**: FFmpeg, PyAutoGUI, Pillow
 
 ## Installation Guide
@@ -85,7 +85,7 @@ Copy `.env.example` and set API keys:
 
 ```bash
 cp backend/.env.example backend/.env
-# Edit backend/.env and add your OpenAI API key
+# Edit backend/.env and add your OpenAI API key or Azure OpenAI credentials
 ```
 
 ## Starting the Application
@@ -294,6 +294,7 @@ Screen2Action now supports MCP servers for enhanced AI capabilities. MCP allows 
 
 2. Configure your preferred LLM (required for intelligent MCP tasks):
    - **OpenAI**: Set `OPENAI_API_KEY` and `OPENAI_MODEL`
+   - **Azure OpenAI**: Set `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, and `AZURE_OPENAI_DEPLOYMENT`
    - **Ollama**: Set `OLLAMA_MODEL` and ensure Ollama is running locally
 
 3. Configure MCP servers (optional):
