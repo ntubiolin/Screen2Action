@@ -40,7 +40,16 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentParagraph, setCurrentParagraph] = useState<ParsedNote | null>(null);
   const [cursorLine, setCursorLine] = useState(1);
-  const [upperSectionHeight, setUpperSectionHeight] = useState(50); // percentage
+  const [sectionHeights, setSectionHeights] = useState({
+    screenshots: 35,
+    mcp: 30,
+    chat: 35,
+  });
+  // Keep a ref in sync with latest heights to avoid stale closures in mouse handlers
+  const sectionHeightsRef = useRef(sectionHeights);
+  useEffect(() => {
+    sectionHeightsRef.current = sectionHeights;
+  }, [sectionHeights]);
   
   // Screenshot related state
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
@@ -69,9 +78,16 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
-  const resizeRef = useRef<HTMLDivElement>(null);
+  const resizeRef1 = useRef<HTMLDivElement>(null); // Between screenshots and MCP
+  const resizeRef2 = useRef<HTMLDivElement>(null); // Between MCP and chat
   const rootRef = useRef<HTMLDivElement>(null);
   const [rootTop, setRootTop] = useState(0);
+
+  // Refs to manage drag state to avoid re-renders breaking the drag handlers
+  const isResizing1Ref = useRef(false);
+  const isResizing2Ref = useRef(false);
+  const startYRef = useRef(0);
+  const startHeightsRef = useRef(sectionHeights);
 
   useEffect(() => {
     loadMarkdownFile();
@@ -608,48 +624,94 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     }
   };
 
-  // Handle resize
+  // Handle resize for both dividers (stable listeners; do not depend on sectionHeights)
   useEffect(() => {
-    if (!resizeRef.current) return;
-    
-    let isResizing = false;
-    let startY = 0;
-    let startHeight = upperSectionHeight;
-    
-    const handleMouseDown = (e: MouseEvent) => {
-      isResizing = true;
-      startY = e.clientY;
-      startHeight = upperSectionHeight;
+    const resizeBar1 = resizeRef1.current;
+    const resizeBar2 = resizeRef2.current;
+    if (!resizeBar1 || !resizeBar2) {
+      // If bars aren't mounted (e.g., no current paragraph), skip binding
+      return;
+    }
+
+    const handleMouseDown1 = (e: MouseEvent) => {
+      isResizing1Ref.current = true;
+      isResizing2Ref.current = false;
+      startYRef.current = e.clientY;
+      startHeightsRef.current = { ...sectionHeightsRef.current };
       document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
       e.preventDefault();
     };
-    
+
+    const handleMouseDown2 = (e: MouseEvent) => {
+      isResizing2Ref.current = true;
+      isResizing1Ref.current = false;
+      startYRef.current = e.clientY;
+      startHeightsRef.current = { ...sectionHeightsRef.current };
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      
-      const deltaY = e.clientY - startY;
-      const containerHeight = resizeRef.current?.parentElement?.clientHeight || 600;
+      if (!isResizing1Ref.current && !isResizing2Ref.current) return;
+
+      const deltaY = e.clientY - startYRef.current;
+      const containerHeight = resizeRef1.current?.parentElement?.clientHeight || 600;
       const deltaPercent = (deltaY / containerHeight) * 100;
-      const newHeight = Math.min(80, Math.max(20, startHeight + deltaPercent));
-      setUpperSectionHeight(newHeight);
+
+      if (isResizing1Ref.current) {
+        // Resizing between screenshots and MCP
+        const start = startHeightsRef.current;
+        const newScreenshotsHeight = Math.min(70, Math.max(10, start.screenshots + deltaPercent));
+        const totalRemainder = 100 - newScreenshotsHeight;
+        const mcpRatio = start.mcp / (start.mcp + start.chat || 1);
+        const tentativeMcp = totalRemainder * mcpRatio;
+        const newMcpHeight = Math.min(60, Math.max(10, tentativeMcp));
+        const newChatHeight = Math.max(10, totalRemainder - newMcpHeight);
+
+        setSectionHeights({
+          screenshots: newScreenshotsHeight,
+          mcp: newMcpHeight,
+          chat: newChatHeight,
+        });
+      } else if (isResizing2Ref.current) {
+        // Resizing between MCP and chat
+        const start = startHeightsRef.current;
+        const screenshotsHeight = start.screenshots;
+        const totalForMcpAndChat = 100 - screenshotsHeight;
+        const newMcpHeight = Math.min(60, Math.max(10, start.mcp + deltaPercent));
+        const newChatHeight = Math.max(10, totalForMcpAndChat - newMcpHeight);
+
+        setSectionHeights({
+          screenshots: screenshotsHeight,
+          mcp: newMcpHeight,
+          chat: newChatHeight,
+        });
+      }
     };
-    
+
     const handleMouseUp = () => {
-      isResizing = false;
+      if (!isResizing1Ref.current && !isResizing2Ref.current) return;
+      isResizing1Ref.current = false;
+      isResizing2Ref.current = false;
       document.body.style.cursor = 'default';
+      document.body.style.userSelect = '';
     };
-    
-    const resizeBar = resizeRef.current;
-    resizeBar.addEventListener('mousedown', handleMouseDown);
+
+    resizeBar1.addEventListener('mousedown', handleMouseDown1);
+    resizeBar2.addEventListener('mousedown', handleMouseDown2);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    
+
     return () => {
-      resizeBar.removeEventListener('mousedown', handleMouseDown);
+      resizeBar1.removeEventListener('mousedown', handleMouseDown1);
+      resizeBar2.removeEventListener('mousedown', handleMouseDown2);
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [upperSectionHeight]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarOpen, currentParagraph]);
 
   return (
     <div ref={rootRef} className="h-full flex bg-gray-900 relative">
@@ -664,6 +726,33 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
         }
         .monaco-editor .view-line.current-paragraph-highlight {
           background-color: rgba(59, 130, 246, 0.05);
+        }
+        .resize-bar {
+          position: relative;
+          height: 4px;
+          background: linear-gradient(to bottom, #374151, #1f2937);
+          cursor: ns-resize;
+          transition: all 0.2s ease;
+          z-index: 10;
+        }
+        .resize-bar:hover {
+          background: linear-gradient(to bottom, #3b82f6, #2563eb);
+          height: 6px;
+          margin: -1px 0;
+        }
+        .resize-bar::before {
+          content: '';
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: 30px;
+          height: 2px;
+          background: rgba(255, 255, 255, 0.3);
+          border-radius: 1px;
+        }
+        .resize-bar:hover::before {
+          background: rgba(255, 255, 255, 0.6);
         }
       `}</style>
 
@@ -758,10 +847,10 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
 
             {currentParagraph && (
               <>
-                {/* Upper Section - Screenshots and Audio Controls */}
+                {/* Screenshots and Audio Controls Section */}
                 <div 
-                  className="flex flex-col"
-                  style={{ height: `${upperSectionHeight}%` }}
+                  className="flex flex-col overflow-hidden"
+                  style={{ height: `${sectionHeights.screenshots}%` }}
                 >
                   {/* Time Range Display */}
                   <div className="px-4 py-2 bg-gray-900 text-sm text-gray-400">
@@ -930,19 +1019,19 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                   </div>
                 </div>
 
-                {/* Resize Bar */}
+                {/* First Resize Bar - Between Screenshots and MCP */}
                 <div
-                  ref={resizeRef}
-                  className="h-1 bg-gray-700 hover:bg-gray-600 cursor-ns-resize transition-colors"
+                  ref={resizeRef1}
+                  className="resize-bar"
+                  title="Drag to resize sections"
                 />
 
-                {/* Lower Section - MCP Settings and LLM Chat */}
+                {/* MCP Settings Section */}
                 <div 
-                  className="flex flex-col"
-                  style={{ height: `${100 - upperSectionHeight}%` }}
+                  className="flex flex-col overflow-hidden"
+                  style={{ height: `${sectionHeights.mcp}%` }}
                 >
-                  {/* MCP Settings */}
-                  <div className="p-4 border-b border-gray-700">
+                  <div className="p-4 h-full overflow-y-auto">
                     <div className="space-y-3">
                       <div>
                         <label className="block text-sm text-gray-400 mb-1">MCP Server</label>
@@ -1022,7 +1111,20 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                       )}
                     </div>
                   </div>
+                </div>
 
+                {/* Second Resize Bar - Between MCP and Chat */}
+                <div
+                  ref={resizeRef2}
+                  className="resize-bar"
+                  title="Drag to resize sections"
+                />
+
+                {/* Chat Section */}
+                <div 
+                  className="flex flex-col overflow-hidden"
+                  style={{ height: `${sectionHeights.chat}%` }}
+                >
                   {/* Chat History */}
                   <div className="flex-1 overflow-y-auto p-4">
                     {chatHistory.length > 0 ? (
