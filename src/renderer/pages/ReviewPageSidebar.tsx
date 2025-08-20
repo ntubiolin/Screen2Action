@@ -40,6 +40,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentParagraph, setCurrentParagraph] = useState<ParsedNote | null>(null);
   const [cursorLine, setCursorLine] = useState(1);
+  const [decorationIds, setDecorationIds] = useState<string[]>([]);
   const [upperSectionHeight, setUpperSectionHeight] = useState(50); // percentage
   
   // Screenshot related state
@@ -332,43 +333,64 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
 
     editor.updateOptions({
       glyphMargin: true,
-      lineDecorationsWidth: 10,
+      lineDecorationsWidth: 15,  // Increased for better visibility
       lineNumbersMinChars: 3,
-      folding: false
+      folding: false,
+      renderLineHighlight: 'all'  // Ensure line highlighting is enabled
     });
 
     // Track cursor position
     editor.onDidChangeCursorPosition((e: any) => {
       setCursorLine(e.position.lineNumber);
-    });
-
-    // Add decorations for current paragraph
-    editor.onDidChangeCursorPosition((e: any) => {
+      
+      // Enhanced paragraph highlighting with better decoration management
       const line = e.position.lineNumber;
       const paragraph = parsedNotes.find(note => 
         line >= note.lineNumber && line <= note.endLineNumber
       );
       
-      if (paragraph) {
-        // Clear existing decorations
-        const oldDecorations = editor.getModel()?.getAllDecorations()
-          .filter((d: any) => d.options.className === 'current-paragraph-highlight')
-          .map((d: any) => d.id) || [];
+      // Always clear previous decorations first
+      setDecorationIds(prevIds => {
+        if (prevIds.length > 0) {
+          editor.deltaDecorations(prevIds, []);
+        }
         
-        // Add new decoration
-        editor.deltaDecorations(oldDecorations, [{
-          range: new monaco.Range(
-            paragraph.lineNumber, 1, 
-            paragraph.endLineNumber, 1
-          ),
-          options: {
-            isWholeLine: true,
-            className: 'current-paragraph-highlight',
-            linesDecorationsClassName: 'current-paragraph-line-decoration'
-          }
-        }]);
-      }
+        if (paragraph) {
+          // Apply new decorations with enhanced styling
+          const newDecorations = [
+            {
+              range: new monaco.Range(
+                paragraph.lineNumber, 1, 
+                paragraph.endLineNumber, Number.MAX_SAFE_INTEGER
+              ),
+              options: {
+                isWholeLine: true,
+                className: 'current-paragraph-highlight',
+                linesDecorationsClassName: 'current-paragraph-line-decoration',
+                overviewRuler: {
+                  color: '#3b82f6',
+                  position: monaco.editor.OverviewRulerLane.Left
+                },
+                minimap: {
+                  color: 'rgba(59, 130, 246, 0.5)',
+                  position: monaco.editor.MinimapPosition.Inline
+                }
+              }
+            }
+          ];
+          
+          return editor.deltaDecorations([], newDecorations);
+        }
+        
+        return [];
+      });
     });
+
+    // Trigger initial highlight if cursor is already positioned
+    const initialPosition = editor.getPosition();
+    if (initialPosition && parsedNotes.length > 0) {
+      editor.trigger('init', 'editor.action.triggerCursorPosition', {});
+    }
   };
 
   const handleContentChange = (value: string | undefined) => {
@@ -635,16 +657,49 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   return (
     <div ref={rootRef} className="h-full flex bg-gray-900 relative">
       <style>{`
+        /* Enhanced paragraph highlighting with prominent left border and background */
         .current-paragraph-highlight {
-          background-color: rgba(59, 130, 246, 0.1);
+          background-color: rgba(59, 130, 246, 0.08) !important;
+          border-left: 4px solid #3b82f6 !important;
+          margin-left: -4px !important;
+          padding-left: 4px !important;
         }
+        
+        /* Left side decoration bar for current paragraph */
         .current-paragraph-line-decoration {
-          background-color: #3b82f6;
-          width: 3px !important;
-          margin-left: 3px;
+          background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
+          width: 4px !important;
+          margin-left: 2px !important;
+          box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
         }
-        .monaco-editor .view-line.current-paragraph-highlight {
-          background-color: rgba(59, 130, 246, 0.05);
+        
+        /* Background highlighting for each line in the paragraph */
+        .monaco-editor .view-lines .current-paragraph-highlight {
+          background-color: rgba(59, 130, 246, 0.06) !important;
+          position: relative;
+        }
+        
+        /* Add a subtle animation for when paragraph changes */
+        .monaco-editor .view-lines .current-paragraph-highlight::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          width: 3px;
+          background: #3b82f6;
+          animation: highlightPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes highlightPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+        
+        /* Ensure the highlight is visible in the gutter area */
+        .monaco-editor .margin-view-overlays .current-paragraph-line-decoration {
+          background: #3b82f6 !important;
+          border-radius: 2px;
         }
       `}</style>
 
@@ -675,13 +730,16 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                 fontSize: 14,
                 wordWrap: 'on',
                 lineNumbers: 'on',
-                minimap: { enabled: false },
+                minimap: { enabled: true },
                 automaticLayout: true,
                 scrollBeyondLastLine: false,
                 padding: { top: 10, bottom: 10 },
                 lineHeight: 21,
                 renderLineHighlight: 'all',
-                contextmenu: true
+                renderLineHighlightOnlyWhenFocus: false,
+                contextmenu: true,
+                overviewRulerLanes: 3,
+                overviewRulerBorder: false
               }}
             />
           </div>
