@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
+import ReactMarkdown from 'react-markdown';
 import { 
   Camera, 
   Play, 
@@ -9,7 +10,9 @@ import {
   ChevronLeft,
   ChevronDown,
   ChevronUp,
-  Download
+  Download,
+  Eye,
+  Edit
 } from 'lucide-react';
 
 interface ReviewPageSidebarProps {
@@ -39,6 +42,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [currentParagraph, setCurrentParagraph] = useState<ParsedNote | null>(null);
   const [cursorLine, setCursorLine] = useState(1);
   const [decorationIds, setDecorationIds] = useState<string[]>([]);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [sectionHeights, setSectionHeights] = useState({
     screenshots: 35,
     mcp: 30,
@@ -58,21 +62,27 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [zoomLevel, setZoomLevel] = useState(1);
   const [copySuccess, setCopySuccess] = useState(false);
   
-  // Handle ESC key to close screenshot preview modal
+  // Handle keyboard shortcuts
   useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      // ESC key to close screenshot preview modal
       if (event.key === 'Escape' && previewScreenshot) {
         setPreviewScreenshot(null);
         setZoomLevel(1);
+        return;
+      }
+      
+      // Ctrl/Cmd + Shift + P to toggle preview mode
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'P') {
+        event.preventDefault();
+        setIsPreviewMode(prev => !prev);
       }
     };
 
-    if (previewScreenshot) {
-      document.addEventListener('keydown', handleEscape);
-    }
+    document.addEventListener('keydown', handleKeyPress);
 
     return () => {
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleKeyPress);
     };
   }, [previewScreenshot]);
   
@@ -869,32 +879,75 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
           </div>
         </div>
 
-        {/* Monaco Editor */}
+        {/* Monaco Editor with Preview Toggle */}
         <div className="flex-1 p-4">
-          <div className="h-full bg-gray-800 rounded-lg overflow-hidden">
-            <Editor
-              height="100%"
-              defaultLanguage="markdown"
-              theme="vs-dark"
-              value={markdownContent}
-              onChange={handleContentChange}
-              onMount={handleEditorMount}
-              options={{
-                fontSize: 14,
-                wordWrap: 'on',
-                lineNumbers: 'on',
-                minimap: { enabled: true },
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-                padding: { top: 10, bottom: 10 },
-                lineHeight: 21,
-                renderLineHighlight: 'all',
-                renderLineHighlightOnlyWhenFocus: false,
-                contextmenu: true,
-                overviewRulerLanes: 3,
-                overviewRulerBorder: false
-              }}
-            />
+          <div className="h-full bg-gray-800 rounded-lg overflow-hidden flex flex-col">
+            {/* Preview Mode Toggle Button */}
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-700 border-b border-gray-600">
+              <h3 className="text-sm font-medium text-gray-200">
+                {isPreviewMode ? 'Preview Mode' : 'Edit Mode'}
+              </h3>
+              <button
+                onClick={() => setIsPreviewMode(!isPreviewMode)}
+                className="flex items-center gap-2 px-3 py-1 text-sm bg-gray-600 hover:bg-gray-500 text-gray-200 rounded transition-colors"
+                title={`${isPreviewMode ? 'Switch to Edit Mode' : 'Switch to Preview Mode'} (Ctrl+Shift+P)`}
+              >
+                {isPreviewMode ? (
+                  <>
+                    <Edit size={16} />
+                    <span>Edit</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye size={16} />
+                    <span>Preview</span>
+                  </>
+                )}
+              </button>
+            </div>
+            
+            {/* Content Area */}
+            <div className="flex-1 overflow-hidden">
+              {isPreviewMode ? (
+                /* Markdown Preview */
+                <div className="h-full overflow-y-auto p-6 prose prose-invert prose-sm max-w-none
+                  prose-headings:text-gray-200 prose-p:text-gray-300 prose-strong:text-gray-200
+                  prose-em:text-gray-300 prose-code:text-blue-300 prose-code:bg-gray-700
+                  prose-pre:bg-gray-900 prose-pre:border prose-pre:border-gray-700
+                  prose-blockquote:border-gray-600 prose-blockquote:text-gray-400
+                  prose-hr:border-gray-600 prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
+                  prose-ul:text-gray-300 prose-ol:text-gray-300 prose-li:text-gray-300
+                  prose-table:text-gray-300 prose-th:text-gray-200 prose-td:text-gray-300
+                  prose-th:border-gray-600 prose-td:border-gray-700">
+                  <ReactMarkdown>{markdownContent}</ReactMarkdown>
+                </div>
+              ) : (
+                /* Monaco Editor */
+                <Editor
+                  height="100%"
+                  defaultLanguage="markdown"
+                  theme="vs-dark"
+                  value={markdownContent}
+                  onChange={handleContentChange}
+                  onMount={handleEditorMount}
+                  options={{
+                    fontSize: 14,
+                    wordWrap: 'on',
+                    lineNumbers: 'on',
+                    minimap: { enabled: true },
+                    automaticLayout: true,
+                    scrollBeyondLastLine: false,
+                    padding: { top: 10, bottom: 10 },
+                    lineHeight: 21,
+                    renderLineHighlight: 'all',
+                    renderLineHighlightOnlyWhenFocus: false,
+                    contextmenu: true,
+                    overviewRulerLanes: 3,
+                    overviewRulerBorder: false
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
