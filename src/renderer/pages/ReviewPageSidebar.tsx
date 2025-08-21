@@ -1032,14 +1032,27 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                             <div
                               key={index}
                               className="relative cursor-pointer group"
-                              onClick={() => setPreviewScreenshot(screenshot.path)}
-                              title="Click to view full size"
+                              onClick={() => toggleScreenshotSelection(index)}
+                              onDoubleClick={() => setPreviewScreenshot(screenshot.path)}
+                              title="Click to select, double-click to preview"
                             >
                               <img
                                 src={`file://${screenshot.path}`}
                                 alt={`Screenshot at ${formatTimestamp(screenshot.timestamp)}`}
-                                className="w-full h-24 object-cover rounded border-2 transition-all border-gray-600 hover:border-blue-500"
+                                className={`w-full h-24 object-cover rounded border-2 transition-all ${
+                                  selectedScreenshots.has(index) 
+                                    ? 'border-blue-500 ring-2 ring-blue-400' 
+                                    : 'border-gray-600 hover:border-blue-500'
+                                }`}
                               />
+                              {/* Selection indicator */}
+                              {selectedScreenshots.has(index) && (
+                                <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-1">
+                                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
+                                </div>
+                              )}
                               <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 text-center">
                                 {formatTimestamp(screenshot.timestamp - currentParagraph.timestamp)}
                               </div>
