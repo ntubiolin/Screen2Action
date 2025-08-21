@@ -919,7 +919,36 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                   prose-ul:text-gray-300 prose-ol:text-gray-300 prose-li:text-gray-300
                   prose-table:text-gray-300 prose-th:text-gray-200 prose-td:text-gray-300
                   prose-th:border-gray-600 prose-td:border-gray-700">
-                  <ReactMarkdown>{markdownContent}</ReactMarkdown>
+                  <ReactMarkdown
+                    components={{
+                      img: ({node, ...props}) => {
+                        // Handle local file:// protocol images
+                        const src = props.src || '';
+                        const alt = props.alt || 'Screenshot';
+                        
+                        return (
+                          <div className="my-4">
+                            <img 
+                              {...props}
+                              src={src}
+                              alt={alt}
+                              className="rounded-lg border border-gray-600 max-w-full h-auto cursor-pointer hover:border-blue-500 transition-colors"
+                              onDoubleClick={() => {
+                                // Extract the file path and open in preview modal on double-click
+                                if (src.startsWith('file://')) {
+                                  setPreviewScreenshot(src.replace('file://', ''));
+                                }
+                              }}
+                              title="Double-click to view full size"
+                            />
+                            <p className="text-xs text-gray-500 mt-1 text-center">{alt}</p>
+                          </div>
+                        );
+                      }
+                    }}
+                  >
+                    {markdownContent}
+                  </ReactMarkdown>
                 </div>
               ) : (
                 /* Monaco Editor */
