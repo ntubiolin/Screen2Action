@@ -40,6 +40,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentParagraph, setCurrentParagraph] = useState<ParsedNote | null>(null);
   const [cursorLine, setCursorLine] = useState(1);
+  const [decorationIds, setDecorationIds] = useState<string[]>([]);
   const [sectionHeights, setSectionHeights] = useState({
     screenshots: 35,
     mcp: 30,
@@ -82,6 +83,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const resizeRef2 = useRef<HTMLDivElement>(null); // Between MCP and chat
   const rootRef = useRef<HTMLDivElement>(null);
   const [rootTop, setRootTop] = useState(0);
+  const decorationCollectionRef = useRef<any>(null);
 
   // Refs to manage drag state to avoid re-renders breaking the drag handlers
   const isResizing1Ref = useRef(false);
@@ -190,6 +192,51 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     loadMcpTools();
   }, [selectedMcpServer]);
 
+  // Helper: apply paragraph highlight decorations based on a line number
+  const applyParagraphHighlight = (lineNumber: number | null) => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current as any;
+    if (!editor || !monaco || !lineNumber || parsedNotes.length === 0) return;
+
+    const paragraph = parsedNotes.find(note =>
+      lineNumber >= note.lineNumber && lineNumber <= note.endLineNumber
+    );
+
+    const model = editor.getModel();
+    if (!model) return;
+
+    const decorations = paragraph ? [
+      {
+        range: new monaco.Range(
+          paragraph.lineNumber, 1,
+          paragraph.endLineNumber, model.getLineMaxColumn(paragraph.endLineNumber)
+        ),
+        options: {
+          isWholeLine: true,
+          className: 'current-paragraph-highlight',
+          linesDecorationsClassName: 'current-paragraph-line-decoration',
+          glyphMarginClassName: 'current-paragraph-glyph',
+          overviewRuler: { color: '#3b82f6', position: monaco.editor.OverviewRulerLane.Left },
+          minimap: { color: 'rgba(59,130,246,0.5)', position: monaco.editor.MinimapPosition.Inline }
+        }
+      }
+    ] : [];
+
+    try {
+      if (!decorationCollectionRef.current) {
+        decorationCollectionRef.current = editor.createDecorationsCollection([]);
+      }
+      decorationCollectionRef.current.set(decorations);
+      // Keep state in sync (optional)
+      setDecorationIds((prev) => {
+        try { if (prev.length) editor.deltaDecorations(prev, []); } catch {}
+        return decorations.length ? editor.deltaDecorations([], decorations) : [];
+      });
+    } catch (e) {
+      console.warn('applyParagraphHighlight failed', e);
+    }
+  };
+
   // Track cursor position and update current paragraph
   useEffect(() => {
     if (parsedNotes.length === 0) return;
@@ -205,6 +252,12 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
       }
     }
   }, [cursorLine, parsedNotes]);
+
+  // Re-apply highlight when notes change or cursor moves (e.g., after initial load)
+  useEffect(() => {
+    if (!editorRef.current) return;
+    applyParagraphHighlight(cursorLine || null);
+  }, [parsedNotes, cursorLine]);
 
   const parseMarkdownToNotes = (markdown: string, duration: number): ParsedNote[] => {
     const lines = markdown.split('\n');
@@ -351,43 +404,29 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
 
     editor.updateOptions({
       glyphMargin: true,
-      lineDecorationsWidth: 10,
+      lineDecorationsWidth: 16,
       lineNumbersMinChars: 3,
-      folding: false
+      folding: false,
+      renderLineHighlight: 'all',
+      renderLineHighlightOnlyWhenFocus: false
     });
 
-    // Track cursor position
-    editor.onDidChangeCursorPosition((e: any) => {
-      setCursorLine(e.position.lineNumber);
-    });
+    decorationCollectionRef.current = editor.createDecorationsCollection([]);
 
-    // Add decorations for current paragraph
-    editor.onDidChangeCursorPosition((e: any) => {
-      const line = e.position.lineNumber;
-      const paragraph = parsedNotes.find(note => 
-        line >= note.lineNumber && line <= note.endLineNumber
-      );
-      
-      if (paragraph) {
-        // Clear existing decorations
-        const oldDecorations = editor.getModel()?.getAllDecorations()
-          .filter((d: any) => d.options.className === 'current-paragraph-highlight')
-          .map((d: any) => d.id) || [];
-        
-        // Add new decoration
-        editor.deltaDecorations(oldDecorations, [{
-          range: new monaco.Range(
-            paragraph.lineNumber, 1, 
-            paragraph.endLineNumber, 1
-          ),
-          options: {
-            isWholeLine: true,
-            className: 'current-paragraph-highlight',
-            linesDecorationsClassName: 'current-paragraph-line-decoration'
-          }
-        }]);
-      }
-    });
+    const handleCursorChange = (line: number) => {
+      setCursorLine(line);
+      applyParagraphHighlight(line);
+    };
+
+    editor.onDidChangeCursorPosition((e: any) => handleCursorChange(e.position.lineNumber));
+    editor.onDidChangeCursorSelection((e: any) => handleCursorChange(e.selection.positionLineNumber));
+
+    const initialPosition = editor.getPosition();
+    if (initialPosition) {
+      handleCursorChange(initialPosition.lineNumber);
+    } else {
+      handleCursorChange(1);
+    }
   };
 
   const handleContentChange = (value: string | undefined) => {
@@ -716,16 +755,59 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   return (
     <div ref={rootRef} className="h-full flex bg-gray-900 relative">
       <style>{`
+        /* Enhanced paragraph highlighting with prominent left border and background */
         .current-paragraph-highlight {
-          background-color: rgba(59, 130, 246, 0.1);
+          background-color: rgba(59, 130, 246, 0.08) !important;
+          border-left: 4px solid #3b82f6 !important;
+          margin-left: -4px !important;
+          padding-left: 4px !important;
         }
+        
+        /* Left side decoration bar for current paragraph (line decorations column) */
         .current-paragraph-line-decoration {
-          background-color: #3b82f6;
-          width: 3px !important;
-          margin-left: 3px;
+          background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
+          width: 4px !important;
+          margin-left: 2px !important;
+          box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
         }
-        .monaco-editor .view-line.current-paragraph-highlight {
-          background-color: rgba(59, 130, 246, 0.05);
+        
+        /* Glyph margin bar at far left */
+        .monaco-editor .glyph-margin .current-paragraph-glyph {
+          background: #3b82f6 !important;
+          width: 4px !important;
+          height: 100%;
+          border-radius: 2px;
+          margin-left: 2px;
+          box-shadow: 0 0 6px rgba(59,130,246,0.6);
+        }
+        
+        /* Background highlighting for each line in the paragraph */
+        .monaco-editor .view-lines .current-paragraph-highlight {
+          background-color: rgba(59, 130, 246, 0.06) !important;
+          position: relative;
+        }
+        
+        /* Add a subtle animation for when paragraph changes */
+        .monaco-editor .view-lines .current-paragraph-highlight::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          width: 3px;
+          background: #3b82f6;
+          animation: highlightPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes highlightPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+        
+        /* Ensure the highlight is visible in the gutter area */
+        .monaco-editor .margin-view-overlays .current-paragraph-line-decoration {
+          background: #3b82f6 !important;
+          border-radius: 2px;
         }
         .resize-bar {
           position: relative;
@@ -783,13 +865,16 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                 fontSize: 14,
                 wordWrap: 'on',
                 lineNumbers: 'on',
-                minimap: { enabled: false },
+                minimap: { enabled: true },
                 automaticLayout: true,
                 scrollBeyondLastLine: false,
                 padding: { top: 10, bottom: 10 },
                 lineHeight: 21,
                 renderLineHighlight: 'all',
-                contextmenu: true
+                renderLineHighlightOnlyWhenFocus: false,
+                contextmenu: true,
+                overviewRulerLanes: 3,
+                overviewRulerBorder: false
               }}
             />
           </div>
