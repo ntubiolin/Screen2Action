@@ -49,6 +49,7 @@ function createWindow() {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: false, // Allow loading local files
     },
   });
 
@@ -81,6 +82,7 @@ function createFloatingWindow() {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: false, // Allow loading local files
     },
   });
 
