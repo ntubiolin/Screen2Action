@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Settings, Key, Folder, Database, Brain } from 'lucide-react';
 
 interface ConfigField {
@@ -25,6 +25,9 @@ export const SettingsPage: React.FC = () => {
   const [values, setValues] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Provider selection derived from values
+  const provider = (values['LLM_PROVIDER'] || 'openai') as 'openai' | 'azure' | 'ollama';
 
   useEffect(() => {
     loadConfiguration();
@@ -53,6 +56,10 @@ export const SettingsPage: React.FC = () => {
     }));
   };
 
+  const handleProviderChange = (newProvider: 'openai' | 'azure' | 'ollama') => {
+    handleValueChange('LLM_PROVIDER', newProvider);
+  };
+
   const handleDirectorySelect = async (key: string) => {
     try {
       const directory = await window.electronAPI.config.selectDirectory();
@@ -64,13 +71,39 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const clearUnselectedProviderKeys = (vals: Record<string, string>) => {
+    const updated = { ...vals };
+    const openaiKeys = ['OPENAI_API_KEY', 'OPENAI_MODEL'];
+    const azureKeys = ['AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_API_KEY', 'AZURE_OPENAI_API_VERSION', 'AZURE_OPENAI_DEPLOYMENT'];
+    const ollamaKeys = ['OLLAMA_MODEL', 'OLLAMA_BASE_URL'];
+
+    if (provider === 'openai') {
+      // Clear Azure and Ollama keys
+      for (const k of [...azureKeys, ...ollamaKeys]) updated[k] = '';
+      // Ensure OpenAI model defaults
+      if (!updated['OPENAI_MODEL']) updated['OPENAI_MODEL'] = 'gpt-4o';
+    } else if (provider === 'azure') {
+      // Clear OpenAI and Ollama keys
+      for (const k of [...openaiKeys, ...ollamaKeys]) updated[k] = '';
+      if (!updated['AZURE_OPENAI_API_VERSION']) updated['AZURE_OPENAI_API_VERSION'] = '2024-02-01';
+    } else if (provider === 'ollama') {
+      // Clear OpenAI and Azure keys
+      for (const k of [...openaiKeys, ...azureKeys]) updated[k] = '';
+      if (!updated['OLLAMA_MODEL']) updated['OLLAMA_MODEL'] = 'llama3.2';
+      if (!updated['OLLAMA_BASE_URL']) updated['OLLAMA_BASE_URL'] = 'http://localhost:11434';
+    }
+
+    return updated;
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
-      await window.electronAPI.config.saveConfigValues(values);
-      
+      // Prepare values: clear keys for non-selected providers so backend precedence works
+      const prepared = clearUnselectedProviderKeys(values);
+      await window.electronAPI.config.saveConfigValues(prepared);
       // Show success message
-      alert('Configuration saved successfully! Please restart the application for changes to take effect.');
+      alert('Configuration saved. Please restart the application for changes to take effect.');
     } catch (error) {
       console.error('Failed to save configuration:', error);
       alert('Failed to save configuration. Please try again.');
@@ -93,6 +126,20 @@ export const SettingsPage: React.FC = () => {
   };
 
   const renderField = (field: ConfigField) => {
+    // Hide the raw LLM_PROVIDER field; we render a nicer control
+    if (field.key === 'LLM_PROVIDER') return null;
+
+    // Conditionally render AI fields based on provider
+    if (field.category === 'AI Services') {
+      const isOpenAIField = field.key.startsWith('OPENAI_');
+      const isAzureField = field.key.startsWith('AZURE_OPENAI_');
+      const isOllamaField = field.key.startsWith('OLLAMA_');
+
+      if (provider === 'openai' && !(isOpenAIField || field.key === 'LLM_PROVIDER')) return null;
+      if (provider === 'azure' && !isAzureField) return null;
+      if (provider === 'ollama' && !isOllamaField) return null;
+    }
+
     const value = values[field.key] || field.default || '';
 
     return (
@@ -153,13 +200,15 @@ export const SettingsPage: React.FC = () => {
   }
 
   // Group fields by category
-  const categorizedFields = config.configuration.configurable_keys.reduce((acc, field) => {
-    if (!acc[field.category]) {
-      acc[field.category] = [];
-    }
-    acc[field.category].push(field);
-    return acc;
-  }, {} as Record<string, ConfigField[]>);
+  const categorizedFields = useMemo(() => {
+    return config.configuration.configurable_keys.reduce((acc, field) => {
+      if (!acc[field.category]) {
+        acc[field.category] = [];
+      }
+      acc[field.category].push(field);
+      return acc;
+    }, {} as Record<string, ConfigField[]>);
+  }, [config]);
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -172,18 +221,65 @@ export const SettingsPage: React.FC = () => {
       </div>
 
       <div className="space-y-8">
-        {Object.entries(categorizedFields).map(([category, fields]) => (
-          <div key={category} className="bg-white rounded-lg border border-gray-200 p-6">
+        {/* AI Services with provider toggle */}
+        {categorizedFields['AI Services'] && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-800 flex items-center mb-4">
-              {getCategoryIcon(category)}
-              <span className="ml-2">{category}</span>
+              {getCategoryIcon('AI Services')}
+              <span className="ml-2">AI Services</span>
             </h2>
-            
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">LLM Provider</label>
+              <div className="inline-flex rounded-md shadow-sm border border-gray-300 overflow-hidden" role="group">
+                <button
+                  type="button"
+                  onClick={() => handleProviderChange('openai')}
+                  className={`px-4 py-2 text-sm font-medium ${provider === 'openai' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                  OpenAI
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleProviderChange('azure')}
+                  className={`px-4 py-2 text-sm font-medium border-l border-gray-300 ${provider === 'azure' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                  Azure OpenAI
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleProviderChange('ollama')}
+                  className={`px-4 py-2 text-sm font-medium border-l border-gray-300 ${provider === 'ollama' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                  Ollama
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">Choose your preferred provider. Only the fields for the selected provider will be used.</p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {fields.map(renderField)}
+              {categorizedFields['AI Services']
+                .filter(f => f.key !== 'LLM_PROVIDER')
+                .map(renderField)}
             </div>
           </div>
-        ))}
+        )}
+
+        {/* Other categories */}
+        {Object.entries(categorizedFields)
+          .filter(([category]) => category !== 'AI Services')
+          .map(([category, fields]) => (
+            <div key={category} className="bg-white rounded-lg border border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-800 flex items-center mb-4">
+                {getCategoryIcon(category)}
+                <span className="ml-2">{category}</span>
+              </h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {fields.map(renderField)}
+              </div>
+            </div>
+          ))}
       </div>
 
       <div className="mt-8 flex justify-end space-x-4">
