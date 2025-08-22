@@ -4,7 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 
 export class ConfigManager {
-  private isProduction = !process.env.NODE_ENV || process.env.NODE_ENV === 'production';
+  // Use Electron's packaging flag; NODE_ENV can be missing in dev
+  private isProduction = app.isPackaged;
   private configFilePath: string;
   private envFilePath: string;
 
@@ -19,11 +20,17 @@ export class ConfigManager {
    */
   async getAppConfig(): Promise<any> {
     try {
-      const configPath = this.isProduction 
-        ? path.join(process.resourcesPath, 'resources', 'app-config.json')
-        : path.join(app.getAppPath(), 'resources', 'app-config.json');
-      
+      // Prefer packaged resources when packaged, else project resources
+      const prodPath = path.join(process.resourcesPath, 'resources', 'app-config.json');
+      const devPath = path.join(app.getAppPath(), 'resources', 'app-config.json');
+
+      const configPath = this.isProduction
+        ? (fs.existsSync(prodPath) ? prodPath : devPath)
+        : (fs.existsSync(devPath) ? devPath : prodPath);
+
       if (!fs.existsSync(configPath)) {
+        const tried = { prodPath, devPath, isProduction: this.isProduction };
+        console.error('App configuration file not found. Tried paths:', tried);
         throw new Error('App configuration file not found');
       }
 
