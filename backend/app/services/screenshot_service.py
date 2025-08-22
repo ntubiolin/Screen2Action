@@ -5,7 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-import pyautogui
 from PIL import Image, ImageDraw, ImageFont
 import pytesseract
 import numpy as np
@@ -13,6 +12,13 @@ import numpy as np
 from app.models.messages import Screenshot
 
 logger = logging.getLogger(__name__)
+
+try:
+    import pyautogui
+    HAS_PYAUTOGUI = True
+except ImportError:
+    HAS_PYAUTOGUI = False
+    logger.warning("pyautogui not available - screenshot features disabled")
 
 class ScreenshotService:
     def __init__(self):
@@ -51,6 +57,10 @@ class ScreenshotService:
         
         try:
             # Capture screenshot
+            if not HAS_PYAUTOGUI:
+                logger.error("Screenshot capture failed - pyautogui not available")
+                return None
+            
             if options and options.get("region"):
                 region = options["region"]
                 screenshot = pyautogui.screenshot(region=(

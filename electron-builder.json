@@ -1,0 +1,90 @@
+{
+  "appId": "com.screen2action.app",
+  "productName": "Screen2Action",
+  "directories": {
+    "output": "release",
+    "buildResources": "assets"
+  },
+  "files": [
+    "dist/",
+    "node_modules/",
+    "package.json",
+    "backend/",
+    "!backend/.venv",
+    "!backend/venv",
+    "!backend/__pycache__",
+    "!backend/**/*.pyc",
+    "!backend/**/*.pyo",
+    "!backend/**/*.pyd",
+    "!backend/**/__pycache__"
+  ],
+  "extraResources": [
+    {
+      "from": "dist-backend",
+      "to": "backend",
+      "filter": [
+        "**/*",
+        "!.venv/**",
+        "!venv/**",
+        "!__pycache__/**",
+        "!**/*.pyc",
+        "!**/*.pyo",
+        "!**/*.pyd",
+        "!**/test_*",
+        "!**/tests/**"
+      ]
+    },
+    {
+      "from": "resources",
+      "to": "resources",
+      "filter": ["**/*"]
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.productivity",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["x64", "arm64"]
+      }
+    ],
+    "icon": "assets/icon.icns"
+  },
+  "dmg": {
+    "title": "Screen2Action Installer ${arch}",
+    "contents": [
+      {
+        "x": 130,
+        "y": 220
+      },
+      {
+        "x": 410,
+        "y": 220,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ],
+    "backgroundColor": "#ffffff",
+    "window": {
+      "width": 540,
+      "height": 380
+    }
+  },
+  "win": {
+    "target": "nsis",
+    "icon": "assets/icon.ico"
+  },
+  "linux": {
+    "target": "AppImage",
+    "icon": "assets/icon.png"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  },
+  "publish": null
+}

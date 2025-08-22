@@ -1,4 +1,4 @@
-import { desktopCapturer, screen, clipboard, nativeImage } from 'electron';
+import { desktopCapturer, screen, clipboard, nativeImage, app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,7 +17,8 @@ export class ScreenshotManager {
   private screenshotsDir: string;
 
   constructor() {
-    this.screenshotsDir = path.join(process.cwd(), 'screenshots');
+    // Use the user's Documents folder for screenshots
+    this.screenshotsDir = path.join(app.getPath('documents'), 'Screen2Action', 'screenshots');
     if (!fs.existsSync(this.screenshotsDir)) {
       fs.mkdirSync(this.screenshotsDir, { recursive: true });
     }

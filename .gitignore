@@ -63,6 +63,8 @@ backend/screenshots/
 out/
 .webpack/
 electron-builder.yml
+release/
+dist-backend/
 
 # Testing
 coverage/

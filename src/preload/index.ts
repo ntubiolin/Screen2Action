@@ -52,6 +52,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   settings: {
     getRecordingsDir: () => ipcRenderer.invoke('get-recordings-dir'),
   },
+
+  config: {
+    getAppConfig: () => ipcRenderer.invoke('get-app-config'),
+    getConfigValues: () => ipcRenderer.invoke('get-config-values'),
+    saveConfigValues: (values: Record<string, string>) => ipcRenderer.invoke('save-config-values', values),
+    selectDirectory: () => ipcRenderer.invoke('select-directory'),
+    getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  },
   
   // Event listeners
   on: (channel: string, callback: Function) => {
@@ -117,6 +125,13 @@ export interface ElectronAPI {
   };
   settings: {
     getRecordingsDir: () => Promise<string>;
+  };
+  config: {
+    getAppConfig: () => Promise<any>;
+    getConfigValues: () => Promise<Record<string, string>>;
+    saveConfigValues: (values: Record<string, string>) => Promise<void>;
+    selectDirectory: () => Promise<string | null>;
+    getAppInfo: () => Promise<{ name: string; version: string; dataPath: string }>;
   };
   on: (channel: string, callback: Function) => void;
   removeListener: (channel: string, callback: Function) => void;

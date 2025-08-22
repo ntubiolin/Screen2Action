@@ -1,0 +1,65 @@
+{
+  "name": "Screen2Action",
+  "version": "1.0.0",
+  "description": "AI-powered screen recording and screenshot tool",
+  "backend": {
+    "executable": "python",
+    "script": "backend/run.py",
+    "port": 8765,
+    "host": "localhost"
+  },
+  "configuration": {
+    "configurable_keys": [
+      {
+        "key": "OPENAI_API_KEY",
+        "name": "OpenAI API Key",
+        "description": "Your OpenAI API key for AI features",
+        "type": "password",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
+        "key": "OPENAI_MODEL", 
+        "name": "OpenAI Model",
+        "description": "OpenAI model to use (e.g., gpt-4o)",
+        "type": "text",
+        "default": "gpt-4o",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
+        "key": "OLLAMA_MODEL",
+        "name": "Ollama Model",
+        "description": "Local Ollama model to use (alternative to OpenAI)",
+        "type": "text", 
+        "default": "llama3.2",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
+        "key": "BRAVE_API_KEY",
+        "name": "Brave Search API Key",
+        "description": "API key for web search capabilities",
+        "type": "password",
+        "required": false,
+        "category": "Additional Services"
+      },
+      {
+        "key": "GITHUB_TOKEN",
+        "name": "GitHub Token",
+        "description": "GitHub personal access token for repository integration",
+        "type": "password",
+        "required": false,
+        "category": "Additional Services"
+      },
+      {
+        "key": "S2A_RECORDINGS_DIR",
+        "name": "Recordings Directory",
+        "description": "Custom directory for storing recordings",
+        "type": "directory",
+        "required": false,
+        "category": "Storage"
+      }
+    ]
+  }
+}
