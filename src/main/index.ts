@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, desktopCapturer, dialog, Menu } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { WebSocketServer } from './websocket';
 import { RecordingManager } from './recording';
 import { ScreenshotManager } from './screenshot';
@@ -120,6 +121,8 @@ function createFloatingWindow() {
 }
 
 app.whenReady().then(async () => {
+  mainLogger.info('App is ready, initializing...');
+  
   // Create application menu
   const template: any[] = [
     {
@@ -266,14 +269,37 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(menu);
 
   // Start with floating window as default
+  mainLogger.info('Creating floating window...');
   createFloatingWindow();
   
   // Initialize managers
-  wsServer = new WebSocketServer();
-  recordingManager = new RecordingManager();
-  screenshotManager = new ScreenshotManager();
-  backendManager = new BackendManager();
-  configManager = new ConfigManager();
+  mainLogger.info('Initializing managers...');
+  try {
+    wsServer = new WebSocketServer();
+    mainLogger.info('WebSocketServer created');
+    recordingManager = new RecordingManager();
+    mainLogger.info('RecordingManager created');
+    screenshotManager = new ScreenshotManager();
+    mainLogger.info('ScreenshotManager created');
+    backendManager = new BackendManager();
+    mainLogger.info('BackendManager created');
+    configManager = new ConfigManager();
+    mainLogger.info('ConfigManager created');
+  } catch (error) {
+    mainLogger.error('Error initializing managers:', error);
+    throw error;
+  }
+
+  // Diagnostics: list logs dir and expected backend log path
+  try {
+    const logsDir = path.dirname(mainLogger.getLogPath());
+    const files = fs.existsSync(logsDir) ? fs.readdirSync(logsDir).filter(f => f.endsWith('.log')) : [];
+    const hasBackendMgr = files.some(f => f.startsWith('backend-manager-'));
+    const backendMgrLogPath = backendManager?.getLogPath();
+    mainLogger.info('Diagnostics/logs', { logsDir, files, hasBackendMgr, backendMgrLogPath });
+  } catch (e) {
+    mainLogger.warn('Diagnostics/logs failed', { error: String(e) });
+  }
   
   // IPC handler to get logs
   ipcMain.handle('get-logs', async () => {
@@ -448,6 +474,7 @@ ipcMain.handle('start-recording', async (_, screenId: string) => {
     // Also start audio recording in Python backend
     if (wsServer) {
       try {
+        mainLogger.info('Sending start_recording to backend', { sessionId, screenId });
         await wsServer.sendMessage({
           type: 'command',
           action: 'start_recording',
@@ -456,12 +483,14 @@ ipcMain.handle('start-recording', async (_, screenId: string) => {
             screenId
           }
         });
-        console.log('Started audio recording in backend for session:', sessionId);
+        mainLogger.info('Started audio recording in backend for session:', sessionId);
       } catch (error: any) {
-        console.warn('Python backend not connected for audio recording:', error.message);
+        mainLogger.warn('Python backend not connected for audio recording:', error.message);
         // Continue without audio if backend is not connected
         // The recording will still work, just without audio
       }
+    } else {
+      mainLogger.warn('WebSocket server not available for audio recording');
     }
     
     return sessionId;
@@ -475,15 +504,18 @@ ipcMain.handle('stop-recording', async () => {
     // Stop audio recording in Python backend
     if (wsServer) {
       try {
+        mainLogger.info('Sending stop_recording to backend');
         await wsServer.sendMessage({
           type: 'command',
           action: 'stop_recording',
           payload: {}
         });
-        console.log('Stopped audio recording in backend');
+        mainLogger.info('Stopped audio recording in backend');
       } catch (error: any) {
-        console.warn('Python backend not connected for stopping audio:', error.message);
+        mainLogger.warn('Python backend not connected for stopping audio:', error.message);
       }
+    } else {
+      mainLogger.warn('WebSocket server not available for stopping audio recording');
     }
     const result = await recordingManager.stopRecording();
     return result; // { duration, sessionId }
@@ -501,6 +533,9 @@ ipcMain.handle('capture-screenshot', async (_, options: any) => {
 ipcMain.handle('send-to-ai', async (_, data: any) => {
   console.log('Received AI command:', data);
   if (wsServer) {
+    // Wait for backend connection to avoid race
+    const ok = await wsServer.waitForBackendConnected(15000);
+    if (!ok) throw new Error('No connected Python backend');
     // If data has an action field, use it directly, otherwise default to process_command
     const message = data.action ? {
       type: 'request',
@@ -521,6 +556,8 @@ ipcMain.handle('send-to-ai', async (_, data: any) => {
 
 ipcMain.handle('enhance-note', async (_, data: any) => {
   if (wsServer) {
+    const ok = await wsServer.waitForBackendConnected(15000);
+    if (!ok) throw new Error('No connected Python backend');
     return await wsServer.sendMessage({
       type: 'request',
       action: 'enhance_note',
@@ -532,6 +569,8 @@ ipcMain.handle('enhance-note', async (_, data: any) => {
 
 ipcMain.handle('process-mcp', async (_, data: any) => {
   if (wsServer) {
+    const ok = await wsServer.waitForBackendConnected(15000);
+    if (!ok) throw new Error('No connected Python backend');
     return await wsServer.sendMessage({
       type: 'request',
       action: 'process_mcp',

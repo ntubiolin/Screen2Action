@@ -29,6 +29,7 @@ dependencies = [
     "langchain>=0.1.0",
     "langchain-openai>=0.0.5",
     "langchain-ollama>=0.0.1",
+    "pip>=25.2",
 ]
 
 [project.scripts]

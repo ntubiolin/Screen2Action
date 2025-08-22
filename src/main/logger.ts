@@ -37,8 +37,11 @@ export class Logger {
   private logFile: string;
   private logStream: fs.WriteStream | null = null;
   private sessionId: string | null = null;
+  // Keep the original logger name to preserve filenames across session switches
+  private name: string;
 
   constructor(name: string = 'main', sessionId?: string) {
+    this.name = name;
     // Create logs directory (unified path shared with Python)
     const logsDir = getBaseLogsDir();
     
@@ -55,7 +58,7 @@ export class Logger {
 
     // Create log file with timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    this.logFile = path.join(logPath, `${name}-${timestamp}.log`);
+    this.logFile = path.join(logPath, `${this.name}-${timestamp}.log`);
     
     // Create write stream
     this.logStream = fs.createWriteStream(this.logFile, { flags: 'a' });
@@ -144,8 +147,8 @@ export class Logger {
       }
       this.sessionId = sessionId;
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const baseName = path.basename(this.logFile).split('-')[0];
-      const name = baseName || 'log';
+      // Preserve the full logger name (e.g., 'backend-manager')
+      const name = this.name || 'log';
       this.logFile = path.join(sessionDir, `${name}-${timestamp}.log`);
       this.logStream = fs.createWriteStream(this.logFile, { flags: 'a' });
       this.info('Logger switched to session log file', { sessionId, logFile: this.logFile });

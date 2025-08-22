@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { app, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { Logger } from './logger';
+import { Logger, mainLogger } from './logger';
 
 export class BackendManager {
   private backendProcess: ChildProcess | null = null;
@@ -18,6 +18,15 @@ export class BackendManager {
       appPath: app.getAppPath(),
       resourcesPath: process.resourcesPath
     });
+    // Mirror path to main log for debugging visibility
+    try {
+      mainLogger.info('BackendManager logger path', { logPath: this.logger.getLogPath() });
+    } catch {}
+  }
+
+  /** Expose current log file path for debugging */
+  getLogPath(): string {
+    return this.logger.getLogPath();
   }
 
   /** Rotate logger into session folder */
@@ -35,28 +44,60 @@ export class BackendManager {
   async startBackend(): Promise<boolean> {
     try {
       const backendPath = this.getBackendPath();
+
+      // Prefer bundled single-file binary in production (Plan A)
+      const platform = process.platform;
+      const arch = process.arch; // 'arm64' | 'x64' | ...
+      const binaryBaseName = platform === 'win32' ? 'Screen2ActionBackend.exe' : 'Screen2ActionBackend';
+
+      // Try arch-specific paths first (helps when both binaries are shipped)
+      const candidateBinaryPaths: string[] = [];
+      if (platform === 'darwin') {
+        candidateBinaryPaths.push(path.join(backendPath, 'bin', `darwin-${arch}`, binaryBaseName));
+      } else if (platform === 'linux') {
+        candidateBinaryPaths.push(path.join(backendPath, 'bin', `linux-${arch}`, binaryBaseName));
+      } else if (platform === 'win32') {
+        candidateBinaryPaths.push(path.join(backendPath, 'bin', `win32-${arch}`, binaryBaseName));
+      }
+      // Generic bin fallback
+      candidateBinaryPaths.push(path.join(backendPath, 'bin', binaryBaseName));
+
       const startupScript = path.join(backendPath, 'start_backend.py');
+
+      const binaryPath = candidateBinaryPaths.find(p => fs.existsSync(p));
 
       this.logger.info('Starting backend', {
         backendPath,
+        candidateBinaryPaths,
+        selectedBinary: binaryPath,
         startupScript,
-        exists: fs.existsSync(startupScript),
+        scriptExists: fs.existsSync(startupScript),
         isProduction: this.isProduction
       });
 
-      // In production, use the bundled startup script
-      if (this.isProduction && fs.existsSync(startupScript)) {
-        this.logger.info('Using production startup script');
-        this.backendProcess = spawn('python3', [startupScript], {
-          cwd: backendPath,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, PYTHONUNBUFFERED: '1' }
-        });
+      if (this.isProduction) {
+        if (binaryPath) {
+          this.logger.info('Using production bundled backend binary', { binaryPath });
+          this.backendProcess = spawn(binaryPath, [], {
+            cwd: backendPath,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+          });
+        } else if (fs.existsSync(startupScript)) {
+          // Fallback to previous python startup method
+          this.logger.info('Bundled binary not found, falling back to python startup script');
+          this.backendProcess = spawn('python3', [startupScript], {
+            cwd: backendPath,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+          });
+        } else {
+          this.logger.error('No production backend found (neither binary nor startup script)');
+          return false;
+        }
       } else {
         // Development mode - use the development startup
         const runScript = path.join(backendPath, 'run.py');
-        
-        // Try to use uv first, fall back to python
         const pythonCmd = this.findPythonExecutable(backendPath);
         this.logger.info('Using development mode', {
           runScript,
@@ -73,10 +114,7 @@ export class BackendManager {
       if (this.backendProcess) {
         this.logger.info('Backend process spawned', { pid: this.backendProcess.pid });
         this.setupBackendListeners();
-        
-        // Wait a bit to see if the process starts successfully
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
         const isRunning = !this.backendProcess.killed;
         this.logger.info('Backend startup check', { isRunning, pid: this.backendProcess.pid });
         return isRunning;

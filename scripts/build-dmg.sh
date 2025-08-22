@@ -62,10 +62,30 @@ check_dependencies() {
     print_success "All dependencies are available"
 }
 
+# Detach any mounted DMG volumes from previous runs
+detach_mounted_volumes() {
+    print_status "Detaching any mounted DMG volumes..."
+    for vol in /Volumes/Screen2Action* /Volumes/Screen2Action\ Installer*; do
+        if [[ -d "$vol" ]]; then
+            print_warning "Detaching $vol"
+            hdiutil detach -force "$vol" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
 # Clean previous builds
 clean_build() {
     print_status "Cleaning previous builds..."
-    rm -rf dist/ release/ dist-backend/
+    detach_mounted_volumes
+    # Clear immutable flags and permissions if any
+    chflags -R nouchg,noschg dist 2>/dev/null || true
+    chflags -R nouchg,noschg release 2>/dev/null || true
+    chflags -R nouchg,noschg dist-backend 2>/dev/null || true
+    chmod -R u+w dist 2>/dev/null || true
+    chmod -R u+w release 2>/dev/null || true
+    chmod -R u+w dist-backend 2>/dev/null || true
+    # Remove directories, ignore errors
+    rm -rf dist/ release/ dist-backend/ 2>/dev/null || true
     print_success "Clean complete"
 }
 
@@ -98,6 +118,15 @@ bundle_backend() {
     print_status "Bundling Python backend..."
     node scripts/bundle-backend.js
     print_success "Backend bundling complete"
+}
+
+# Build single-file backend binary (Plan A)
+build_backend_binary() {
+    print_status "Building backend executable (Plan A)..."
+    chmod +x scripts/build-backend-binary.sh
+    scripts/build-backend-binary.sh
+    print_success "Backend executable built for current arch"
+    print_status "If you need a universal DMG with both darwin-arm64 and darwin-x64 backends, run this build on each architecture to produce both bin/darwin-arm64 and bin/darwin-x64." 
 }
 
 # Build frontend
@@ -160,6 +189,7 @@ main() {
     install_frontend_deps
     setup_backend
     bundle_backend
+    build_backend_binary
     build_frontend
     create_icons
     create_dmg

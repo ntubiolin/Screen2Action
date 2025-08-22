@@ -22,6 +22,9 @@ if (fs.existsSync(distDir)) {
 }
 fs.mkdirSync(distDir, { recursive: true });
 
+// Ensure bin dir for potential binaries
+fs.mkdirSync(path.join(distDir, 'bin'), { recursive: true });
+
 // Copy backend files
 console.log('📁 Copying backend files...');
 copyDirectory(backendDir, distDir, ['.venv', 'venv', '__pycache__', '*.pyc', '*.pyo', '*.pyd', 'test_*']);
@@ -63,6 +66,7 @@ function copyDirectory(src, dest, excludePatterns = []) {
         const stat = fs.statSync(srcPath);
         
         if (stat.isDirectory()) {
+            fs.mkdirSync(destPath, { recursive: true });
             copyDirectory(srcPath, destPath, excludePatterns);
         } else {
             fs.copyFileSync(srcPath, destPath);
@@ -81,7 +85,7 @@ function createRequirementsTxt() {
         if (depLines) {
             const deps = depLines[1]
                 .split(',')
-                .map(dep => dep.trim().replace(/['"]/g, ''))
+                .map(dep => dep.trim().replace(/["']/g, ''))
                 .filter(dep => dep && !dep.startsWith('#'));
             
             fs.writeFileSync(requirementsPath, deps.join('\n'));
@@ -116,12 +120,23 @@ def install_uv():
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Installing uv package manager...")
+        # Ensure ~/.cargo/bin on PATH after install
+        cargo_bin = os.path.expanduser('~/.cargo/bin')
+        env = os.environ.copy()
+        env['PATH'] = cargo_bin + os.pathsep + env.get('PATH', '')
         if platform.system() == "Windows":
             subprocess.run([sys.executable, '-m', 'pip', 'install', 'uv'], check=True)
         else:
-            # Use curl installer for Unix-like systems
-            subprocess.run(['curl', '-LsSf', 'https://astral.sh/uv/install.sh'], check=True)
-        return True
+            # Use curl installer for Unix-like systems and pipe to sh
+            subprocess.run(['bash', '-lc', 'curl -LsSf https://astral.sh/uv/install.sh | sh'], check=True, env=env)
+        # verify
+        try {
+            subprocess.run(['uv', '--version'], check=True, capture_output=True, env=env)
+            return True
+        } catch (Exception) {
+            return False
+        }
+    }
 
 def setup_environment():
     """Set up Python virtual environment and install dependencies"""

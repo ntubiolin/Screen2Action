@@ -51,7 +51,7 @@
     "icon": "assets/icon.icns"
   },
   "dmg": {
-    "title": "Screen2Action Installer",
+    "title": "Screen2Action Installer ${arch}",
     "contents": [
       {
         "x": 130,
