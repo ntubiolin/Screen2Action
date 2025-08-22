@@ -84,6 +84,14 @@ info "Running PyInstaller..."
   --distpath "$TARGET_DIR" \
   --workpath "$WORK_DIR" \
   --specpath "$SPEC_DIR" \
+  --exclude-module pyautogui \
+  --exclude-module rubicon \
+  --exclude-module rubicon-objc \
+  --exclude-module mouseinfo \
+  --exclude-module pygetwindow \
+  --exclude-module pymsgbox \
+  --exclude-module pytweening \
+  --exclude-module pyscreeze \
   "$ENTRY"
 
 # Ensure executable permissions on Unix

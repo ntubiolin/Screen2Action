@@ -323,19 +323,20 @@ app.whenReady().then(async () => {
   
   // Start WebSocket server for Python backend communication
   try {
+    mainLogger.info('Starting WebSocket server on port 8765...');
     const wsStarted = await wsServer.start(8765);
     if (!wsStarted) {
-      console.error('WebSocket server failed to start on port 8765');
+      mainLogger.error('WebSocket server failed to start on port 8765');
       // Show a user-friendly error message
       dialog.showErrorBox(
         'WebSocket Server Error',
         'Failed to start WebSocket server on port 8765. The application may not function properly.'
       );
     } else {
-      console.log('WebSocket server started successfully on port 8765');
+      mainLogger.info('WebSocket server started successfully on port 8765');
     }
   } catch (error) {
-    console.error('Error starting WebSocket server:', error);
+    mainLogger.error('Error starting WebSocket server:', error);
     dialog.showErrorBox(
       'WebSocket Server Error',
       `Failed to start WebSocket server: ${error}`
@@ -453,10 +454,50 @@ ipcMain.handle('expand-to-main-window', async (event, sessionId?: string, notes?
 
 // IPC Handlers
 ipcMain.handle('get-sources', async () => {
-  const sources = await desktopCapturer.getSources({
-    types: ['window', 'screen'],
-  });
-  return sources;
+  try {
+    mainLogger.info('Getting desktop sources...');
+    const sources = await desktopCapturer.getSources({
+      types: ['window', 'screen'],
+    });
+    mainLogger.info(`Found ${sources.length} sources`);
+    
+    // If no sources found, it might be a permissions issue
+    if (sources.length === 0) {
+      mainLogger.warn('No sources found - check screen recording permissions');
+      // On macOS, prompt for screen recording permission
+      if (process.platform === 'darwin') {
+        const { systemPreferences } = require('electron');
+        const screenAccess = systemPreferences.getMediaAccessStatus('screen');
+        mainLogger.info('Screen recording permission status:', screenAccess);
+        
+        if (screenAccess !== 'granted') {
+          dialog.showErrorBox(
+            'Screen Recording Permission Required',
+            'Screen2Action needs screen recording permission to capture your screen.\n\n' +
+            'Please grant permission in System Settings > Privacy & Security > Screen Recording, ' +
+            'then restart the application.'
+          );
+        }
+      }
+    }
+    
+    return sources;
+  } catch (error) {
+    mainLogger.error('Failed to get desktop sources:', error);
+    
+    // Show user-friendly error message
+    if (process.platform === 'darwin') {
+      dialog.showErrorBox(
+        'Screen Recording Permission Required',
+        'Screen2Action needs screen recording permission to capture your screen.\n\n' +
+        'Please grant permission in:\n' +
+        'System Settings > Privacy & Security > Screen Recording\n\n' +
+        'Then restart Screen2Action.'
+      );
+    }
+    
+    throw new Error('Failed to get sources. Please check screen recording permissions.');
+  }
 });
 
 ipcMain.handle('start-recording', async (_, screenId: string) => {
@@ -531,11 +572,20 @@ ipcMain.handle('capture-screenshot', async (_, options: any) => {
 });
 
 ipcMain.handle('send-to-ai', async (_, data: any) => {
-  console.log('Received AI command:', data);
-  if (wsServer) {
+  mainLogger.info('Received AI command:', data);
+  if (!wsServer) {
+    mainLogger.error('WebSocket server not initialized when handling send-to-ai');
+    throw new Error('WebSocket server not initialized. Please restart the application.');
+  }
+  
+  try {
     // Wait for backend connection to avoid race
     const ok = await wsServer.waitForBackendConnected(15000);
-    if (!ok) throw new Error('No connected Python backend');
+    if (!ok) {
+      mainLogger.error('Backend connection timeout after 15 seconds');
+      throw new Error('No connected Python backend. Please check if the backend is running.');
+    }
+    
     // If data has an action field, use it directly, otherwise default to process_command
     const message = data.action ? {
       type: 'request',
@@ -546,38 +596,63 @@ ipcMain.handle('send-to-ai', async (_, data: any) => {
       action: 'process_command',
       payload: data,
     };
-    console.log('Sending to backend:', message);
+    
+    mainLogger.info('Sending to backend:', message);
     const result = await wsServer.sendMessage(message);
-    console.log('Backend response:', result);
+    mainLogger.info('Backend response:', result);
     return result;
+  } catch (error) {
+    mainLogger.error('Error in send-to-ai handler:', error);
+    throw error;
   }
-  throw new Error('WebSocket server not initialized');
 });
 
 ipcMain.handle('enhance-note', async (_, data: any) => {
-  if (wsServer) {
+  if (!wsServer) {
+    mainLogger.error('WebSocket server not initialized when handling enhance-note');
+    throw new Error('WebSocket server not initialized. Please restart the application.');
+  }
+  
+  try {
     const ok = await wsServer.waitForBackendConnected(15000);
-    if (!ok) throw new Error('No connected Python backend');
+    if (!ok) {
+      mainLogger.error('Backend connection timeout for enhance-note');
+      throw new Error('No connected Python backend. Please check if the backend is running.');
+    }
+    
     return await wsServer.sendMessage({
       type: 'request',
       action: 'enhance_note',
       payload: data,
     });
+  } catch (error) {
+    mainLogger.error('Error in enhance-note handler:', error);
+    throw error;
   }
-  throw new Error('WebSocket server not initialized');
 });
 
 ipcMain.handle('process-mcp', async (_, data: any) => {
-  if (wsServer) {
+  if (!wsServer) {
+    mainLogger.error('WebSocket server not initialized when handling process-mcp');
+    throw new Error('WebSocket server not initialized. Please restart the application.');
+  }
+  
+  try {
     const ok = await wsServer.waitForBackendConnected(15000);
-    if (!ok) throw new Error('No connected Python backend');
+    if (!ok) {
+      mainLogger.error('Backend connection timeout for process-mcp');
+      throw new Error('No connected Python backend. Please check if the backend is running.');
+    }
+    
     return await wsServer.sendMessage({
       type: 'request',
       action: 'process_mcp',
       payload: data,
     });
+  } catch (error) {
+    mainLogger.error('Error in process-mcp handler:', error);
+    throw error;
   }
-  throw new Error('WebSocket server not initialized');
 });
 
 // Audio handlers

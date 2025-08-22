@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-import pyautogui
 import sounddevice as sd
 import numpy as np
 from PIL import Image
@@ -17,6 +16,13 @@ import wave
 from app.models.messages import RecordingSession
 
 logger = logging.getLogger(__name__)
+
+try:
+    import pyautogui
+    HAS_PYAUTOGUI = True
+except ImportError:
+    HAS_PYAUTOGUI = False
+    logger.warning("pyautogui not available - screenshot features disabled")
 
 
 def _expand_home(p: str) -> str:
@@ -261,7 +267,12 @@ class RecordingService:
         
         try:
             # Capture screenshot
-            screenshot = pyautogui.screenshot()
+            if HAS_PYAUTOGUI:
+                screenshot = pyautogui.screenshot()
+            else:
+                # Return a placeholder or skip screenshot if pyautogui not available
+                logger.warning("Screenshot skipped - pyautogui not available")
+                return None
             # Milliseconds from start kept for ordering/metadata
             relative_ms = int((datetime.now() - self.current_session.start_time).total_seconds() * 1000)
             # Human-readable date-time prefix for filenames

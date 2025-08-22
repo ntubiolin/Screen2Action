@@ -53,6 +53,9 @@ export class BackendManager {
       // Try arch-specific paths first (helps when both binaries are shipped)
       const candidateBinaryPaths: string[] = [];
       if (platform === 'darwin') {
+        // On macOS, try both arm64 and x64 paths as Electron might report different arch
+        candidateBinaryPaths.push(path.join(backendPath, 'bin', `darwin-arm64`, binaryBaseName));
+        candidateBinaryPaths.push(path.join(backendPath, 'bin', `darwin-x64`, binaryBaseName));
         candidateBinaryPaths.push(path.join(backendPath, 'bin', `darwin-${arch}`, binaryBaseName));
       } else if (platform === 'linux') {
         candidateBinaryPaths.push(path.join(backendPath, 'bin', `linux-${arch}`, binaryBaseName));

@@ -130,13 +130,11 @@ def install_uv():
             # Use curl installer for Unix-like systems and pipe to sh
             subprocess.run(['bash', '-lc', 'curl -LsSf https://astral.sh/uv/install.sh | sh'], check=True, env=env)
         # verify
-        try {
+        try:
             subprocess.run(['uv', '--version'], check=True, capture_output=True, env=env)
             return True
-        } catch (Exception) {
+        except Exception:
             return False
-        }
-    }
 
 def setup_environment():
     """Set up Python virtual environment and install dependencies"""
