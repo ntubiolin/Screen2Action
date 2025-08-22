@@ -5,12 +5,10 @@ import {
   Play, 
   Pause,
   Square,
-  Check,
   ChevronRight,
   ChevronLeft,
   ChevronDown,
   ChevronUp,
-  Maximize2,
   Download
 } from 'lucide-react';
 
@@ -57,6 +55,26 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [loadingScreenshots, setLoadingScreenshots] = useState(false);
   const [selectedScreenshots, setSelectedScreenshots] = useState<Set<number>>(new Set());
   const [previewScreenshot, setPreviewScreenshot] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [copySuccess, setCopySuccess] = useState(false);
+  
+  // Handle ESC key to close screenshot preview modal
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && previewScreenshot) {
+        setPreviewScreenshot(null);
+        setZoomLevel(1);
+      }
+    };
+
+    if (previewScreenshot) {
+      document.addEventListener('keydown', handleEscape);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [previewScreenshot]);
   
   // Audio playback state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -377,7 +395,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
       while (currentTs < endTimestamp && screenshotPromises.length < maxScreenshots) {
         const captureTs = currentTs;
         screenshotPromises.push(
-          window.electronAPI.file.getScreenshotPath(sessionId, captureTs, 'thumb')
+          window.electronAPI.file.getScreenshotPath(sessionId, captureTs, 'full')
             .then(path => ({ 
               path, 
               timestamp: captureTs, 
@@ -961,23 +979,14 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                             <div
                               key={index}
                               className="relative cursor-pointer group"
-                              onClick={() => toggleScreenshotSelection(index)}
-                              onDoubleClick={() => setPreviewScreenshot(screenshot.path)}
+                              onClick={() => setPreviewScreenshot(screenshot.path)}
+                              title="Click to view full size"
                             >
                               <img
                                 src={`file://${screenshot.path}`}
                                 alt={`Screenshot at ${formatTimestamp(screenshot.timestamp)}`}
-                                className={`w-full h-20 object-cover rounded border-2 transition-all ${
-                                  selectedScreenshots.has(index)
-                                    ? 'border-blue-500 ring-2 ring-blue-400'
-                                    : 'border-gray-600 hover:border-gray-500'
-                                }`}
+                                className="w-full h-24 object-cover rounded border-2 transition-all border-gray-600 hover:border-blue-500"
                               />
-                              {selectedScreenshots.has(index) && (
-                                <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-0.5">
-                                  <Check size={12} className="text-white" />
-                                </div>
-                              )}
                               <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 text-center">
                                 {formatTimestamp(screenshot.timestamp - currentParagraph.timestamp)}
                               </div>
@@ -1286,24 +1295,139 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
         )}
       </div>
 
-      {/* Screenshot Preview Modal */}
+      {/* Enhanced Screenshot Preview Modal with Zoom and Copy */}
       {previewScreenshot && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
-          onClick={() => setPreviewScreenshot(null)}
-        >
-          <div className="max-w-4xl max-h-[90vh] p-4">
-            <img 
-              src={`file://${previewScreenshot}`} 
-              alt="Preview" 
-              className="max-w-full max-h-full object-contain"
-            />
+        <div className="fixed inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center z-50">
+          {/* Control bar */}
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 rounded-lg px-4 py-2 flex items-center space-x-3 z-10">
+            {/* Zoom controls */}
             <button
-              onClick={() => setPreviewScreenshot(null)}
-              className="absolute top-4 right-4 text-white bg-gray-800 rounded-full p-2 hover:bg-gray-700"
-            >
-              <Maximize2 size={20} />
+              onClick={() => setZoomLevel(prev => Math.max(prev - 0.25, 0.5))}
+              className="p-2 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+              title="Zoom Out (-)">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
+              </svg>
             </button>
+            
+            <span className="text-white text-sm min-w-[60px] text-center">
+              {Math.round(zoomLevel * 100)}%
+            </span>
+            
+            <button
+              onClick={() => setZoomLevel(prev => Math.min(prev + 0.25, 3))}
+              className="p-2 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+              title="Zoom In (+)">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+              </svg>
+            </button>
+            
+            <div className="w-px h-6 bg-gray-600"></div>
+            
+            {/* Reset zoom */}
+            <button
+              onClick={() => setZoomLevel(1)}
+              className="p-2 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+              title="Reset Zoom (100%)">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+            </button>
+            
+            <div className="w-px h-6 bg-gray-600"></div>
+            
+            {/* Copy image */}
+            <button
+              onClick={async () => {
+                try {
+                  const img = new Image();
+                  img.crossOrigin = 'anonymous';
+                  
+                  await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                    img.src = `file://${previewScreenshot}`;
+                  });
+
+                  const canvas = document.createElement('canvas');
+                  canvas.width = img.naturalWidth;
+                  canvas.height = img.naturalHeight;
+                  const ctx = canvas.getContext('2d');
+                  if (!ctx) throw new Error('Failed to get canvas context');
+                  ctx.drawImage(img, 0, 0);
+
+                  canvas.toBlob(async (blob) => {
+                    if (!blob) throw new Error('Failed to create blob');
+                    
+                    try {
+                      await navigator.clipboard.write([
+                        new ClipboardItem({ 'image/png': blob })
+                      ]);
+                      setCopySuccess(true);
+                      setTimeout(() => setCopySuccess(false), 2000);
+                    } catch (err) {
+                      console.error('Failed to copy image to clipboard:', err);
+                    }
+                  }, 'image/png');
+                } catch (error) {
+                  console.error('Failed to copy image:', error);
+                }
+              }}
+              className={`p-2 rounded transition-colors ${
+                copySuccess 
+                  ? 'bg-green-600 hover:bg-green-500' 
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              title={copySuccess ? "Copied!" : "Copy Image"}>
+              {copySuccess ? (
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              )}
+            </button>
+            
+            <div className="w-px h-6 bg-gray-600"></div>
+            
+            {/* Close button */}
+            <button
+              onClick={() => {
+                setPreviewScreenshot(null);
+                setZoomLevel(1);
+              }}
+              className="p-2 bg-red-600 hover:bg-red-500 rounded transition-colors"
+              title="Close (ESC)">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          {/* Image container */}
+          <div 
+            className="relative overflow-auto max-w-full max-h-full p-8"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setPreviewScreenshot(null);
+                setZoomLevel(1);
+              }
+            }}>
+            <img 
+              src={`file://${previewScreenshot}`}
+              alt="Full-size screenshot"
+              className="object-contain cursor-move"
+              style={{
+                transform: `scale(${zoomLevel})`,
+                transition: 'transform 0.2s ease-in-out',
+                maxWidth: '90vw',
+                maxHeight: '85vh'
+              }}
+              draggable={false}
+            />
           </div>
         </div>
       )}
