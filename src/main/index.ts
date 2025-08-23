@@ -218,13 +218,46 @@ app.whenReady().then(async () => {
               },
             });
 
-            const isDev = process.env.NODE_ENV === 'development';
+            const isDev = !app.isPackaged;
+            const devBase = process.env.S2A_DEV_URL || 'http://localhost:3000';
+            const devUrl = `${devBase}?page=settings`;
+            const prodFile = path.join(__dirname, '../renderer/index.html');
+            const fs = require('fs');
+
+            const loadProd = () => {
+              if (fs.existsSync(prodFile)) {
+                mainLogger.info('Opening Settings window (prod file)', { prodFile });
+                settingsWindow.loadFile(prodFile, { hash: 'settings' });
+              } else {
+                mainLogger.error('Prod renderer file missing; cannot open Settings from file', { prodFile });
+              }
+            };
+
+            const loadDev = () => {
+              mainLogger.info('Opening Settings window (dev url)', { devUrl });
+              settingsWindow.loadURL(devUrl);
+              try { settingsWindow.webContents.openDevTools({ mode: 'detach' }); } catch {}
+            };
+
+            settingsWindow.webContents.on('did-finish-load', () => {
+              mainLogger.info('Settings window did-finish-load');
+            });
+            settingsWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+              mainLogger.error('Settings window did-fail-load', { errorCode, errorDescription, validatedURL });
+              if (validatedURL && validatedURL.startsWith('http')) {
+                loadProd();
+              } else if (validatedURL && validatedURL.startsWith('file:')) {
+                loadDev();
+              }
+            });
+            settingsWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+              mainLogger.info('Settings console', { level, message, line, sourceId });
+            });
+
             if (isDev) {
-              settingsWindow.loadURL(`http://localhost:3000?page=settings`);
+              loadDev();
             } else {
-              settingsWindow.loadFile(path.join(__dirname, '../renderer/index.html'), {
-                hash: 'settings'
-              });
+              loadProd();
             }
           }
         },

@@ -201,6 +201,7 @@ export const SettingsPage: React.FC = () => {
 
   // Group fields by category
   const categorizedFields = useMemo(() => {
+    if (!config) return {} as Record<string, ConfigField[]>;
     return config.configuration.configurable_keys.reduce((acc, field) => {
       if (!acc[field.category]) {
         acc[field.category] = [];
