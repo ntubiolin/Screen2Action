@@ -208,8 +208,9 @@ app.whenReady().then(async () => {
           click: () => {
             // Create settings window
             const settingsWindow = new BrowserWindow({
-              width: 800,
-              height: 600,
+              width: 900,
+              height: 700,
+              minHeight: 600,
               titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
               webPreferences: {
                 preload: path.join(__dirname, '../preload/index.js'),
@@ -236,7 +237,7 @@ app.whenReady().then(async () => {
             const loadDev = () => {
               mainLogger.info('Opening Settings window (dev url)', { devUrl });
               settingsWindow.loadURL(devUrl);
-              try { settingsWindow.webContents.openDevTools({ mode: 'detach' }); } catch {}
+              // Dev tools removed - can be opened manually with Ctrl+Shift+I or Cmd+Opt+I
             };
 
             settingsWindow.webContents.on('did-finish-load', () => {

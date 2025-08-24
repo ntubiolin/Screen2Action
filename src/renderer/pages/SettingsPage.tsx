@@ -96,6 +96,18 @@ export const SettingsPage: React.FC = () => {
     return updated;
   };
 
+  // Group fields by category - moved before early returns to fix hooks order
+  const categorizedFields = useMemo(() => {
+    if (!config) return {} as Record<string, ConfigField[]>;
+    return config.configuration.configurable_keys.reduce((acc, field) => {
+      if (!acc[field.category]) {
+        acc[field.category] = [];
+      }
+      acc[field.category].push(field);
+      return acc;
+    }, {} as Record<string, ConfigField[]>);
+  }, [config]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -156,7 +168,7 @@ export const SettingsPage: React.FC = () => {
                 type="text"
                 value={value}
                 onChange={(e) => handleValueChange(field.key, e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                 placeholder={field.default || `Enter ${field.name.toLowerCase()}`}
               />
               <button
@@ -171,7 +183,7 @@ export const SettingsPage: React.FC = () => {
               type={field.type === 'password' ? 'password' : 'text'}
               value={value}
               onChange={(e) => handleValueChange(field.key, e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
               placeholder={field.default || `Enter ${field.name.toLowerCase()}`}
             />
           )}
@@ -199,29 +211,18 @@ export const SettingsPage: React.FC = () => {
     );
   }
 
-  // Group fields by category
-  const categorizedFields = useMemo(() => {
-    if (!config) return {} as Record<string, ConfigField[]>;
-    return config.configuration.configurable_keys.reduce((acc, field) => {
-      if (!acc[field.category]) {
-        acc[field.category] = [];
-      }
-      acc[field.category].push(field);
-      return acc;
-    }, {} as Record<string, ConfigField[]>);
-  }, [config]);
-
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-          <Settings className="w-6 h-6 mr-2" />
-          Configuration
-        </h1>
-        <p className="text-gray-600 mt-1">{config.description}</p>
-      </div>
+    <div className="h-full overflow-y-auto bg-gray-50">
+      <div className="p-6 max-w-4xl mx-auto">
+        <div className="mb-6 sticky top-0 bg-gray-50 pb-4 z-10">
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+            <Settings className="w-6 h-6 mr-2" />
+            Configuration
+          </h1>
+          <p className="text-gray-600 mt-1">{config.description}</p>
+        </div>
 
-      <div className="space-y-8">
+        <div className="space-y-8">
         {/* AI Services with provider toggle */}
         {categorizedFields['AI Services'] && (
           <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -281,22 +282,23 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
           ))}
-      </div>
+        </div>
 
-      <div className="mt-8 flex justify-end space-x-4">
-        <button
-          onClick={() => window.close()}
-          className="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save Configuration'}
-        </button>
+        <div className="mt-8 pb-6 flex justify-end space-x-4">
+          <button
+            onClick={() => window.close()}
+            className="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-50 bg-white"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </button>
+        </div>
       </div>
     </div>
   );
