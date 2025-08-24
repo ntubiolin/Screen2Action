@@ -11,6 +11,15 @@
   "configuration": {
     "configurable_keys": [
       {
+        "key": "LLM_PROVIDER",
+        "name": "LLM Provider",
+        "description": "Choose your LLM provider",
+        "type": "text",
+        "default": "openai",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
         "key": "OPENAI_API_KEY",
         "name": "OpenAI API Key",
         "description": "Your OpenAI API key for AI features",
@@ -28,11 +37,53 @@
         "category": "AI Services"
       },
       {
+        "key": "AZURE_OPENAI_ENDPOINT",
+        "name": "Azure OpenAI Endpoint",
+        "description": "Your Azure OpenAI endpoint URL",
+        "type": "text",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
+        "key": "AZURE_OPENAI_API_KEY",
+        "name": "Azure OpenAI API Key",
+        "description": "Your Azure OpenAI API key",
+        "type": "password",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
+        "key": "AZURE_OPENAI_API_VERSION",
+        "name": "Azure OpenAI API Version",
+        "description": "Azure OpenAI API version (e.g., 2024-02-01)",
+        "type": "text",
+        "default": "2024-02-01",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
+        "key": "AZURE_OPENAI_DEPLOYMENT",
+        "name": "Azure OpenAI Deployment",
+        "description": "Your Azure OpenAI deployment name",
+        "type": "text",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
         "key": "OLLAMA_MODEL",
         "name": "Ollama Model",
         "description": "Local Ollama model to use (alternative to OpenAI)",
         "type": "text", 
         "default": "llama3.2",
+        "required": false,
+        "category": "AI Services"
+      },
+      {
+        "key": "OLLAMA_BASE_URL",
+        "name": "Ollama Base URL",
+        "description": "Ollama server URL",
+        "type": "text",
+        "default": "http://localhost:11434",
         "required": false,
         "category": "AI Services"
       },

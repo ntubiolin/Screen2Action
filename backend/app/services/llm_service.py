@@ -30,14 +30,33 @@ class LLMService:
                 )
                 # Use Azure deployment name as model
                 self.model = azure_deployment
-                logger.info(f"Azure OpenAI client initialized with deployment: {azure_deployment}")
+                # Print configuration details
+                masked_key = azure_api_key[:8] + "..." + azure_api_key[-4:] if len(azure_api_key) > 12 else "***"
+                logger.info("=" * 60)
+                logger.info("🔵 AZURE OPENAI CONFIGURATION")
+                logger.info("=" * 60)
+                logger.info(f"Service: Azure OpenAI")
+                logger.info(f"Endpoint: {azure_endpoint}")
+                logger.info(f"API Key: {masked_key}")
+                logger.info(f"API Version: {azure_api_version}")
+                logger.info(f"Deployment: {azure_deployment}")
+                logger.info(f"Model: {self.model}")
+                logger.info("=" * 60)
             except Exception as e:
                 logger.error(f"Failed to initialize Azure OpenAI client: {e}")
         elif self.api_key:
             try:
                 from openai import OpenAI
                 self.client = OpenAI(api_key=self.api_key)
-                logger.info("OpenAI client initialized")
+                # Print configuration details
+                masked_key = self.api_key[:8] + "..." + self.api_key[-4:] if len(self.api_key) > 12 else "***"
+                logger.info("=" * 60)
+                logger.info("🟢 OPENAI CONFIGURATION")
+                logger.info("=" * 60)
+                logger.info(f"Service: OpenAI")
+                logger.info(f"API Key: {masked_key}")
+                logger.info(f"Model: {self.model}")
+                logger.info("=" * 60)
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI client: {e}")
     
