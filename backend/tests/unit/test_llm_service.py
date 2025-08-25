@@ -1,228 +1,209 @@
 """Unit tests for LLMService."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import base64
+import json
+from unittest.mock import MagicMock, patch
 from app.services.llm_service import LLMService
 
 
 class TestLLMService:
     """Test suite for LLMService."""
 
-    @pytest.mark.asyncio
-    async def test_process_with_openai(self, llm_service):
-        """Test processing with OpenAI provider."""
-        # Mock OpenAI response
+    @pytest.fixture
+    def mock_openai_client(self):
+        """Create a mock OpenAI client."""
+        client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [
-            MagicMock(message=MagicMock(content="OpenAI response"))
+            MagicMock(message=MagicMock(content="Test response"))
         ]
-        llm_service.openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
-        
-        result = await llm_service.process(
-            prompt="Test prompt",
-            provider="openai",
-            model="gpt-4"
-        )
-        
-        assert result == "OpenAI response"
-        llm_service.openai_client.chat.completions.create.assert_called_once()
+        client.chat.completions.create.return_value = mock_response
+        return client
+
+    @pytest.fixture
+    def llm_service_with_client(self, mock_openai_client):
+        """Create LLMService with mocked client."""
+        service = LLMService()
+        service.client = mock_openai_client
+        service.model = "gpt-4"
+        return service
 
     @pytest.mark.asyncio
-    async def test_process_with_anthropic(self, llm_service):
-        """Test processing with Anthropic provider."""
-        # Mock Anthropic response
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="Anthropic response")]
-        llm_service.anthropic_client.messages.create = AsyncMock(return_value=mock_response)
+    async def test_enhance_note_with_client(self, llm_service_with_client):
+        """Test enhancing a note with configured client."""
+        context = {
+            "noteContent": "This is a test note"
+        }
         
-        result = await llm_service.process(
-            prompt="Test prompt",
-            provider="anthropic",
-            model="claude-3"
-        )
+        result = await llm_service_with_client.enhance_note("Summarize this", context)
         
-        assert result == "Anthropic response"
-        llm_service.anthropic_client.messages.create.assert_called_once()
+        assert "response" in result
+        assert result["response"] == "Test response"
+        llm_service_with_client.client.chat.completions.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_process_with_image_openai(self, llm_service):
-        """Test processing with image using OpenAI."""
-        # Mock OpenAI response
-        mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(message=MagicMock(content="Image analysis result"))
-        ]
-        llm_service.openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    async def test_enhance_note_without_client(self):
+        """Test enhancing a note without configured client."""
+        service = LLMService()
+        service.client = None
         
-        # Create a simple base64 image
-        image_data = base64.b64encode(b"fake_image_data").decode()
+        context = {"noteContent": "Test note"}
+        result = await service.enhance_note("Summarize", context)
         
-        result = await llm_service.process(
-            prompt="Analyze this image",
-            image=image_data,
-            provider="openai",
-            model="gpt-4-vision"
+        assert "response" in result
+        assert "not configured" in result["response"]
+
+    @pytest.mark.asyncio
+    async def test_enhance_note_error_handling(self, llm_service_with_client):
+        """Test error handling in enhance_note."""
+        llm_service_with_client.client.chat.completions.create.side_effect = Exception("API Error")
+        
+        context = {"noteContent": "Test note"}
+        result = await llm_service_with_client.enhance_note("Summarize", context)
+        
+        assert "response" in result
+        assert "Error processing request" in result["response"]
+
+    @pytest.mark.asyncio
+    async def test_process_screenshot_command_with_client(self, llm_service_with_client):
+        """Test processing screenshot command with configured client."""
+        # Mock JSON response
+        json_response = json.dumps({
+            "intent": "annotate",
+            "parameters": {"color": "red", "location": "top-left"}
+        })
+        llm_service_with_client.client.chat.completions.create.return_value.choices[0].message.content = json_response
+        
+        result = await llm_service_with_client.process_screenshot_command("Add red arrow to top left")
+        
+        assert result["intent"] == "annotate"
+        assert "parameters" in result
+        assert result["parameters"]["color"] == "red"
+
+    @pytest.mark.asyncio
+    async def test_process_screenshot_command_with_ocr(self, llm_service_with_client):
+        """Test processing screenshot command with OCR text."""
+        json_response = json.dumps({
+            "intent": "extract_text",
+            "parameters": {"text": "extracted"}
+        })
+        llm_service_with_client.client.chat.completions.create.return_value.choices[0].message.content = json_response
+        
+        result = await llm_service_with_client.process_screenshot_command(
+            "Extract text",
+            ocr_text="Sample OCR text"
         )
         
-        assert result == "Image analysis result"
+        assert result["intent"] == "extract_text"
         
-        # Verify the call included image in the content
-        call_args = llm_service.openai_client.chat.completions.create.call_args
+        # Verify OCR text was included in the request
+        call_args = llm_service_with_client.client.chat.completions.create.call_args
         messages = call_args[1]["messages"]
-        assert any("image_url" in str(msg) for msg in messages)
+        assert "OCR Text" in messages[1]["content"]
 
     @pytest.mark.asyncio
-    async def test_process_with_image_anthropic(self, llm_service):
-        """Test processing with image using Anthropic."""
-        # Mock Anthropic response
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="Image analysis with Claude")]
-        llm_service.anthropic_client.messages.create = AsyncMock(return_value=mock_response)
+    async def test_process_screenshot_command_without_client(self):
+        """Test processing screenshot command without configured client."""
+        service = LLMService()
+        service.client = None
         
-        # Create a simple base64 image
-        image_data = base64.b64encode(b"fake_image_data").decode()
+        result = await service.process_screenshot_command("Test command")
         
-        result = await llm_service.process(
-            prompt="Analyze this image",
-            image=image_data,
-            provider="anthropic",
-            model="claude-3"
-        )
-        
-        assert result == "Image analysis with Claude"
-        
-        # Verify the call included image in the messages
-        call_args = llm_service.anthropic_client.messages.create.call_args
-        messages = call_args[1]["messages"]
-        assert any("image" in str(msg) for msg in messages)
+        assert result["intent"] == "unknown"
+        assert result["parameters"] == {}
 
     @pytest.mark.asyncio
-    async def test_process_with_system_prompt(self, llm_service):
-        """Test processing with system prompt."""
-        # Mock OpenAI response
-        mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(message=MagicMock(content="Response with system prompt"))
-        ]
-        llm_service.openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    async def test_process_screenshot_command_error_handling(self, llm_service_with_client):
+        """Test error handling in process_screenshot_command."""
+        llm_service_with_client.client.chat.completions.create.side_effect = Exception("API Error")
         
-        result = await llm_service.process(
-            prompt="User prompt",
-            system_prompt="You are a helpful assistant",
-            provider="openai"
-        )
+        result = await llm_service_with_client.process_screenshot_command("Test command")
         
-        assert result == "Response with system prompt"
-        
-        # Verify system prompt was included
-        call_args = llm_service.openai_client.chat.completions.create.call_args
-        messages = call_args[1]["messages"]
-        assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "You are a helpful assistant"
+        assert result["intent"] == "unknown"
+        assert result["parameters"] == {}
 
     @pytest.mark.asyncio
-    async def test_process_with_temperature(self, llm_service):
-        """Test processing with custom temperature."""
-        # Mock OpenAI response
-        mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(message=MagicMock(content="Temperature test"))
-        ]
-        llm_service.openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    async def test_process_general_with_client(self, llm_service_with_client):
+        """Test general processing with configured client."""
+        payload = {
+            "prompt": "Test prompt",
+            "context": {"key": "value"}
+        }
         
-        result = await llm_service.process(
-            prompt="Test",
-            temperature=0.5,
-            provider="openai"
-        )
+        result = await llm_service_with_client.process_general(payload)
         
-        assert result == "Temperature test"
-        
-        # Verify temperature was passed
-        call_args = llm_service.openai_client.chat.completions.create.call_args
-        assert call_args[1]["temperature"] == 0.5
+        assert "response" in result
+        assert result["response"] == "Test response"
 
     @pytest.mark.asyncio
-    async def test_process_with_max_tokens(self, llm_service):
-        """Test processing with max_tokens limit."""
-        # Mock OpenAI response
-        mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(message=MagicMock(content="Limited response"))
-        ]
-        llm_service.openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    async def test_process_general_without_client(self):
+        """Test general processing without configured client."""
+        service = LLMService()
+        service.client = None
         
-        result = await llm_service.process(
-            prompt="Test",
-            max_tokens=100,
-            provider="openai"
-        )
+        payload = {"prompt": "Test"}
+        result = await service.process_general(payload)
         
-        assert result == "Limited response"
-        
-        # Verify max_tokens was passed
-        call_args = llm_service.openai_client.chat.completions.create.call_args
-        assert call_args[1]["max_tokens"] == 100
+        assert "response" in result
+        assert result["response"] == "LLM service not configured"
 
     @pytest.mark.asyncio
-    async def test_process_with_invalid_provider(self, llm_service):
-        """Test processing with invalid provider."""
-        with pytest.raises(ValueError, match="Unsupported provider"):
-            await llm_service.process(
-                prompt="Test",
-                provider="invalid_provider"
-            )
+    async def test_process_general_error_handling(self, llm_service_with_client):
+        """Test error handling in process_general."""
+        llm_service_with_client.client.chat.completions.create.side_effect = Exception("API Error")
+        
+        payload = {"prompt": "Test"}
+        result = await llm_service_with_client.process_general(payload)
+        
+        assert "response" in result
+        assert "Error" in result["response"]
 
-    @pytest.mark.asyncio
-    async def test_process_openai_error_handling(self, llm_service):
-        """Test error handling for OpenAI API errors."""
-        llm_service.openai_client.chat.completions.create = AsyncMock(
-            side_effect=Exception("API Error")
-        )
-        
-        with pytest.raises(Exception, match="API Error"):
-            await llm_service.process(
-                prompt="Test",
-                provider="openai"
-            )
+    def test_initialization_with_openai_key(self):
+        """Test initialization with OpenAI API key."""
+        with patch('app.services.llm_service.os.getenv') as mock_getenv:
+            mock_getenv.side_effect = lambda key, default=None: {
+                'OPENAI_API_KEY': 'test-key',
+                'LLM_MODEL': 'gpt-4'
+            }.get(key, default)
+            
+            with patch('app.services.llm_service.OpenAI') as mock_openai:
+                mock_client = MagicMock()
+                mock_openai.return_value = mock_client
+                
+                service = LLMService()
+                
+                assert service.api_key == 'test-key'
+                assert service.model == 'gpt-4'
+                assert service.client == mock_client
+                mock_openai.assert_called_once_with(api_key='test-key')
 
-    @pytest.mark.asyncio
-    async def test_process_anthropic_error_handling(self, llm_service):
-        """Test error handling for Anthropic API errors."""
-        llm_service.anthropic_client.messages.create = AsyncMock(
-            side_effect=Exception("API Error")
-        )
-        
-        with pytest.raises(Exception, match="API Error"):
-            await llm_service.process(
-                prompt="Test",
-                provider="anthropic"
-            )
+    def test_initialization_with_azure_openai(self):
+        """Test initialization with Azure OpenAI configuration."""
+        with patch('app.services.llm_service.os.getenv') as mock_getenv:
+            mock_getenv.side_effect = lambda key, default=None: {
+                'AZURE_OPENAI_ENDPOINT': 'https://test.openai.azure.com',
+                'AZURE_OPENAI_API_KEY': 'azure-key',
+                'AZURE_OPENAI_API_VERSION': '2023-05-15',
+                'AZURE_OPENAI_DEPLOYMENT': 'gpt-4-deployment'
+            }.get(key, default)
+            
+            with patch('app.services.llm_service.AzureOpenAI') as mock_azure:
+                mock_client = MagicMock()
+                mock_azure.return_value = mock_client
+                
+                service = LLMService()
+                
+                assert service.model == 'gpt-4-deployment'
+                assert service.client == mock_client
+                mock_azure.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_get_available_models(self, llm_service):
-        """Test getting available models."""
-        models = await llm_service.get_available_models()
-        
-        assert "openai" in models
-        assert "anthropic" in models
-        assert len(models["openai"]) > 0
-        assert len(models["anthropic"]) > 0
-
-    @pytest.mark.asyncio
-    async def test_validate_api_keys(self, llm_service):
-        """Test API key validation."""
-        # Mock successful API calls
-        mock_response_openai = MagicMock()
-        mock_response_openai.choices = [MagicMock(message=MagicMock(content="test"))]
-        llm_service.openai_client.chat.completions.create = AsyncMock(return_value=mock_response_openai)
-        
-        mock_response_anthropic = MagicMock()
-        mock_response_anthropic.content = [MagicMock(text="test")]
-        llm_service.anthropic_client.messages.create = AsyncMock(return_value=mock_response_anthropic)
-        
-        validation = await llm_service.validate_api_keys()
-        
-        assert validation["openai"] is True
-        assert validation["anthropic"] is True
+    def test_initialization_without_api_key(self):
+        """Test initialization without any API key."""
+        with patch('app.services.llm_service.os.getenv') as mock_getenv:
+            mock_getenv.return_value = None
+            
+            service = LLMService()
+            
+            assert service.api_key is None
+            assert service.client is None
+            assert service.model == 'gpt-4'  # Default model

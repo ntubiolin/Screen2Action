@@ -94,22 +94,25 @@ def screenshot_service(mock_websocket_client, temp_dir):
 @pytest.fixture
 def llm_service():
     """Create an LLMService instance with mocked API clients."""
-    with patch('app.services.llm_service.OpenAI') as mock_openai, \
-         patch('app.services.llm_service.Anthropic') as mock_anthropic:
+    with patch('app.services.llm_service.os.getenv') as mock_getenv:
+        # Mock environment variables
+        mock_getenv.side_effect = lambda key, default=None: {
+            'OPENAI_API_KEY': 'test-openai-key',
+            'LLM_MODEL': 'gpt-4',
+            'ANTHROPIC_API_KEY': 'test-anthropic-key'
+        }.get(key, default)
         
-        # Mock OpenAI client
-        mock_openai_instance = MagicMock()
-        mock_openai.return_value = mock_openai_instance
-        
-        # Mock Anthropic client
-        mock_anthropic_instance = MagicMock()
-        mock_anthropic.return_value = mock_anthropic_instance
-        
-        service = LLMService()
-        service.openai_client = mock_openai_instance
-        service.anthropic_client = mock_anthropic_instance
-        
-        yield service
+        with patch('app.services.llm_service.OpenAI') as mock_openai, \
+             patch('app.services.llm_service.AzureOpenAI') as mock_azure:
+            
+            # Mock OpenAI client
+            mock_openai_instance = MagicMock()
+            mock_openai.return_value = mock_openai_instance
+            
+            service = LLMService()
+            service.client = mock_openai_instance
+            
+            yield service
 
 
 @pytest.fixture
