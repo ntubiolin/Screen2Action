@@ -238,8 +238,53 @@ See [DMG Build Guide](docs/DMG_BUILD_GUIDE.md) for detailed instructions.
 
 ### Run Tests
 
+#### Frontend Tests
 ```bash
+# Run all frontend tests
 npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage
+npm run test:coverage
+```
+
+#### Backend Tests
+```bash
+# Run all backend tests
+cd backend
+uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov=app --cov-report=html
+
+# Run specific test file
+uv run pytest tests/test_recording_service.py
+
+# Run tests with verbose output
+uv run pytest -v
+
+# Run tests with specific markers
+uv run pytest -m "not slow"
+```
+
+#### End-to-End Tests
+```bash
+# Run E2E tests (requires both frontend and backend running)
+npm run test:e2e
+
+# Run E2E tests in headless mode
+npm run test:e2e:headless
+```
+
+#### Integration Tests
+```bash
+# Test review page with mock data
+npm run test:review:full
+
+# Test with specific session
+./test-review-full.sh YOUR_SESSION_ID
 ```
 
 ### Code Style
