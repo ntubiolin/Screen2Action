@@ -99,19 +99,45 @@ export class BackendManager {
           return false;
         }
       } else {
-        // Development mode - use the development startup
+        // Development mode - use the wrapper script if available
+        const shellScript = path.join(backendPath, 'start_backend.sh');
+        const batchScript = path.join(backendPath, 'start_backend.bat');
         const runScript = path.join(backendPath, 'run.py');
-        const pythonCmd = this.findPythonExecutable(backendPath);
-        this.logger.info('Using development mode', {
-          runScript,
-          pythonCmd,
-          scriptExists: fs.existsSync(runScript)
-        });
-        this.backendProcess = spawn(pythonCmd, [runScript], {
-          cwd: backendPath,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, PYTHONUNBUFFERED: '1' }
-        });
+        
+        if (process.platform === 'win32' && fs.existsSync(batchScript)) {
+          this.logger.info('Using development mode with batch wrapper', {
+            batchScript,
+            scriptExists: fs.existsSync(batchScript)
+          });
+          this.backendProcess = spawn('cmd.exe', ['/c', batchScript], {
+            cwd: backendPath,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+          });
+        } else if (process.platform !== 'win32' && fs.existsSync(shellScript)) {
+          this.logger.info('Using development mode with shell wrapper', {
+            shellScript,
+            scriptExists: fs.existsSync(shellScript)
+          });
+          this.backendProcess = spawn('/bin/bash', [shellScript], {
+            cwd: backendPath,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+          });
+        } else {
+          // Fallback to direct Python execution
+          const pythonCmd = this.findPythonExecutable(backendPath);
+          this.logger.info('Using development mode with direct Python', {
+            runScript,
+            pythonCmd,
+            scriptExists: fs.existsSync(runScript)
+          });
+          this.backendProcess = spawn(pythonCmd, [runScript], {
+            cwd: backendPath,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+          });
+        }
       }
 
       if (this.backendProcess) {
