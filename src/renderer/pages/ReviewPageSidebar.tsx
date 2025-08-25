@@ -94,6 +94,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [aiPrompt, setAiPrompt] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{role: 'user' | 'assistant', content: string}>>([]);
+  const [isImageChat, setIsImageChat] = useState(false);
   
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -606,7 +607,9 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   };
 
   const handleSendToAI = async () => {
-    if (!aiPrompt.trim() || !currentParagraph) return;
+    if (!aiPrompt.trim()) return;
+    if (!isImageChat && !currentParagraph) return;
+    if (isImageChat && selectedScreenshots.size === 0) return;
     
     setIsProcessing(true);
     const userMessage = aiPrompt;
@@ -616,13 +619,43 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
     try {
       let response = '';
       
-      if (selectedMcpServer && selectedMcpTools.size > 0) {
+      if (isImageChat) {
+        // Prepare selected screenshot paths for image chat
+        const selectedScreenshotPaths: string[] = [];
+        const selectedIndices = Array.from(selectedScreenshots).sort((a, b) => a - b);
+        
+        for (const index of selectedIndices) {
+          const screenshot = screenshots[index];
+          if (screenshot) {
+            try {
+              const fullPath = await window.electronAPI.file.getScreenshotPath(
+                sessionId, 
+                screenshot.timestamp, 
+                'full'
+              );
+              selectedScreenshotPaths.push(fullPath);
+            } catch (error) {
+              console.error('Failed to get full screenshot:', error);
+            }
+          }
+        }
+        
+        // Use image chat with selected screenshots
+        const result = await (window as any).electronAPI.ai.enhanceNote({
+          note: currentParagraph ? currentParagraph.content : 'Image analysis',
+          prompt: userMessage,
+          sessionId: sessionId,
+          images: selectedScreenshotPaths,
+          isImageChat: true
+        });
+        response = result.enhanced || 'No response received';
+      } else if (selectedMcpServer && selectedMcpTools.size > 0) {
         // Use MCP with selected tools
         const result = await window.electronAPI.ai.sendCommand({
           action: 'send_mcp_message',
           payload: {
             message: userMessage,
-            context: currentParagraph.content,
+            context: currentParagraph?.content || '',
             tools: Array.from(selectedMcpTools)
           },
         });
@@ -630,7 +663,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
       } else {
         // Use standard AI
         const result = await (window as any).electronAPI.ai.enhanceNote({
-          note: currentParagraph.content,
+          note: currentParagraph?.content || '',
           prompt: userMessage,
           sessionId: sessionId
         });
@@ -1254,6 +1287,25 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
 
                   {/* Input Area */}
                   <div className="p-4 border-t border-gray-700">
+                    {/* Image Chat Checkbox */}
+                    <div className="mb-3">
+                      <label className="flex items-center text-sm text-gray-300 cursor-pointer hover:text-white">
+                        <input
+                          type="checkbox"
+                          checked={isImageChat}
+                          onChange={(e) => setIsImageChat(e.target.checked)}
+                          disabled={selectedScreenshots.size === 0}
+                          className="mr-2"
+                        />
+                        <span className={selectedScreenshots.size === 0 ? 'text-gray-500' : ''}>
+                          Image Chat ({selectedScreenshots.size} selected)
+                        </span>
+                      </label>
+                      {isImageChat && selectedScreenshots.size === 0 && (
+                        <p className="text-xs text-yellow-500 mt-1">Please select screenshots above to use Image Chat</p>
+                      )}
+                    </div>
+                    
                     <div className="flex gap-2">
                       <textarea
                         value={aiPrompt}
@@ -1264,17 +1316,17 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                             handleSendToAI();
                           }
                         }}
-                        placeholder="Ask about this paragraph..."
+                        placeholder={isImageChat ? "Ask about the selected screenshots..." : "Ask about this paragraph..."}
                         className="flex-1 bg-gray-700 text-white px-3 py-2 rounded border border-gray-600 focus:border-blue-500 focus:outline-none resize-none text-sm"
                         rows={2}
-                        disabled={isProcessing || !currentParagraph}
+                        disabled={isProcessing || (!currentParagraph && !isImageChat) || (isImageChat && selectedScreenshots.size === 0)}
                       />
                     </div>
                     <button
                       onClick={handleSendToAI}
-                      disabled={isProcessing || !aiPrompt.trim() || !currentParagraph}
+                      disabled={isProcessing || !aiPrompt.trim() || (!currentParagraph && !isImageChat) || (isImageChat && selectedScreenshots.size === 0)}
                       className={`mt-2 w-full px-4 py-2 rounded font-medium transition-colors text-sm ${
-                        isProcessing || !aiPrompt.trim() || !currentParagraph
+                        isProcessing || !aiPrompt.trim() || (!currentParagraph && !isImageChat) || (isImageChat && selectedScreenshots.size === 0)
                           ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
                           : 'bg-blue-600 hover:bg-blue-700 text-white'
                       }`}
