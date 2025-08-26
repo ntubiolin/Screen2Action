@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFloatingWindow: () => ipcRenderer.invoke('open-floating-window'),
     closeFloatingWindow: () => ipcRenderer.invoke('close-floating-window'),
     expandToMainWindow: (sessionId?: string, notes?: string) => ipcRenderer.invoke('expand-to-main-window', sessionId, notes),
+    resizeFloatingWindow: (width: number, height: number) => ipcRenderer.invoke('resize-floating-window', width, height),
   },
   
   settings: {
@@ -93,7 +94,7 @@ export interface ElectronAPI {
   screenshot: {
     capture: (options?: any) => Promise<string>;
     copy: (id: string) => Promise<void>;
-    save: (id: string, path: string) => Promise<void>;
+    save: (id: string, path: string) => Promise<string>;
   };
   sources: {
     getDesktopSources: () => Promise<any[]>;
@@ -122,6 +123,7 @@ export interface ElectronAPI {
     openFloatingWindow: () => Promise<boolean>;
     closeFloatingWindow: () => Promise<boolean>;
     expandToMainWindow: (sessionId?: string, notes?: string) => Promise<boolean>;
+    resizeFloatingWindow: (width: number, height: number) => Promise<boolean>;
   };
   settings: {
     getRecordingsDir: () => Promise<string>;

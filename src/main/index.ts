@@ -463,6 +463,24 @@ ipcMain.handle('close-floating-window', async () => {
   return true;
 });
 
+ipcMain.handle('resize-floating-window', async (_, width: number, height: number) => {
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    // Get current window bounds to preserve position
+    const bounds = floatingWindow.getBounds();
+    
+    // Animate the resize for smooth transition
+    floatingWindow.setBounds({
+      x: bounds.x,
+      y: bounds.y,
+      width: width,
+      height: height
+    }, true); // true enables animation on macOS
+    
+    return true;
+  }
+  return false;
+});
+
 ipcMain.handle('expand-to-main-window', async (event, sessionId?: string, notes?: string) => {
   if (floatingWindow) {
     floatingWindow.close();
@@ -601,6 +619,37 @@ ipcMain.handle('stop-recording', async () => {
 ipcMain.handle('capture-screenshot', async (_, options: any) => {
   if (screenshotManager) {
     return await screenshotManager.capture(options);
+  }
+  throw new Error('Screenshot manager not initialized');
+});
+
+ipcMain.handle('copy-screenshot', async (_, idOrPath: string) => {
+  if (screenshotManager) {
+    const { nativeImage, clipboard } = require('electron');
+    // If it's a file path, copy directly from the path
+    if (idOrPath.includes('/') || idOrPath.includes('\\')) {
+      const image = nativeImage.createFromPath(idOrPath);
+      clipboard.writeImage(image);
+    } else {
+      // Otherwise, treat it as an ID
+      await screenshotManager.copyToClipboard(idOrPath);
+    }
+  } else {
+    throw new Error('Screenshot manager not initialized');
+  }
+});
+
+ipcMain.handle('save-screenshot', async (_, id: string, relativePath: string) => {
+  if (screenshotManager) {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Get the full path to user_screenshots directory
+    const userScreenshotsDir = path.join(app.getPath('documents'), 'Screen2Action', 'user_screenshots');
+    const fullPath = path.join(userScreenshotsDir, path.basename(relativePath));
+    
+    // Return the full path
+    return fullPath;
   }
   throw new Error('Screenshot manager not initialized');
 });

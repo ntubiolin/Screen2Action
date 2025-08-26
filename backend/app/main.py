@@ -181,6 +181,16 @@ async def startup_event():
                 response = await process_message(message)
                 if response:
                     await electron_client.send_response(message.id, response.dict().get('payload', response.dict()))
+            elif data.get('action') == 'analyze_screenshot':
+                # Handle screenshot analysis with VLM grounding
+                logger.info("Processing analyze_screenshot action")
+                payload = data.get('payload', {})
+                result = await llm_service.analyze_screenshot(
+                    payload.get('command', ''),
+                    payload.get('screenshot', ''),
+                    payload.get('supportGrounding', False)
+                )
+                await electron_client.send_response(data['id'], result)
             else:
                 logger.warning(f"Unknown action: {data.get('action')}")
                 if 'id' in data:
