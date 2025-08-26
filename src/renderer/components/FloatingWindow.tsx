@@ -28,9 +28,10 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   // AI Window state
   const [showAIWindow, setShowAIWindow] = useState(false);
   const [isAIWindowCollapsed, setIsAIWindowCollapsed] = useState(false);
-  const baseWindowHeight = 300;
-  const aiWindowExpandedHeight = 300;
+  const baseWindowHeight = 300; // minimum height for the editor panel when AI is visible
+  const aiWindowExpandedMinHeight = 260; // minimum height for the AI panel when expanded
   const aiWindowCollapsedHeight = 40; // Just the header height
+  const aiWindowExpandedRatio = 0.5; // default portion of window height allocated to AI when expanded
   const [aiScreenshotPath, setAIScreenshotPath] = useState<string | null>(null);
   const [aiCommand, setAICommand] = useState<string>('');
   const [triggerLineNumber, setTriggerLineNumber] = useState<number | null>(null);
@@ -44,6 +45,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const prevHeadingKeysRef = useRef<string[]>([]);
   const contentWidgetsRef = useRef<any[]>([]);
   const decorationIdsRef = useRef<string[]>([]);
+  const aiContainerRef = useRef<HTMLDivElement | null>(null);
   
   const { addNote, clearNotes, setRecordingDuration } = useRecordingStore();
   
@@ -51,28 +53,60 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const headingLineRegex = /^#{1,6}\s+/;
   
   // AI trigger detection regex
-  const aiTriggerRegex = /^!!!(.*)$/;
+  const aiTriggerRegex = /^\s*!!!\s*(.*)$/;
 
   // Load screen sources on mount
   useEffect(() => {
     loadSources();
   }, []);
   
-  // Resize window when AI window is toggled or collapsed
+  // Ensure a minimum window size when AI window is toggled or collapsed
   useEffect(() => {
-    const resizeWindow = async () => {
+    const ensureMinSize = async () => {
       try {
-        let newHeight = baseWindowHeight;
-        if (showAIWindow) {
-          newHeight = baseWindowHeight + (isAIWindowCollapsed ? aiWindowCollapsedHeight : aiWindowExpandedHeight);
+        if (!showAIWindow) return;
+        const minTotal = baseWindowHeight + (isAIWindowCollapsed ? aiWindowCollapsedHeight : aiWindowExpandedMinHeight);
+        const currentHeight = Math.floor(window.innerHeight || 0);
+        if (currentHeight < minTotal) {
+          const currentWidth = Math.max(300, Math.floor(window.innerWidth || 400));
+          await window.electronAPI.window.resizeFloatingWindow(currentWidth, minTotal);
         }
-        await window.electronAPI.window.resizeFloatingWindow(400, newHeight);
       } catch (error) {
-        console.error('Failed to resize floating window:', error);
+        console.error('Failed to ensure floating window size:', error);
       }
     };
-    
-    resizeWindow();
+
+    ensureMinSize();
+  }, [showAIWindow, isAIWindowCollapsed]);
+
+  // Helper: ensure AI panel is visible (resize + scroll)
+  const ensureAIVisible = async () => {
+    try {
+      const currentWidth = Math.max(300, Math.floor(window.innerWidth || 400));
+      const minTotal = baseWindowHeight + (isAIWindowCollapsed ? aiWindowCollapsedHeight : aiWindowExpandedMinHeight);
+      const currentHeight = Math.floor(window.innerHeight || 0);
+      if (currentHeight < minTotal) {
+        await window.electronAPI.window.resizeFloatingWindow(currentWidth, minTotal);
+      }
+      // After potential resize, scroll the AI container into view
+      requestAnimationFrame(() => {
+        aiContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        // Fallback: scroll window to bottom
+        try {
+          const doc = document.documentElement;
+          window.scrollTo({ top: doc.scrollHeight, behavior: 'smooth' });
+        } catch {}
+      });
+    } catch (e) {
+      console.error('ensureAIVisible failed', e);
+    }
+  };
+
+  // Also run ensureAIVisible whenever AI window becomes visible or collapse state changes
+  useEffect(() => {
+    if (showAIWindow) {
+      ensureAIVisible();
+    }
   }, [showAIWindow, isAIWindowCollapsed]);
 
   // Timer for recording duration and screenshot count update
@@ -479,7 +513,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         setShowAIWindow(true);
       } else {
         console.log('No command, inserting screenshot directly');
-        // No command, directly insert screenshot into markdown
+        // Use the provided line number to avoid relying on mutable state
         insertScreenshotIntoMarkdown(screenshotPath, lineNumber);
       }
     } catch (error) {
@@ -543,8 +577,8 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         setShowAIWindow(true);
       } else {
         console.log('No command, inserting screenshot directly');
-        // No command, directly insert screenshot into markdown
-        insertScreenshotIntoMarkdown(screenshotPath, lineNumber);
+        // No command, directly insert screenshot into markdown at the exact trigger line
+        insertScreenshotIntoMarkdown(screenshotPath, triggerLineNumber);
       }
     } catch (error) {
       console.error('Failed to capture screenshot:', error);
@@ -580,10 +614,41 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       range,
       text: markdownImage
     }]);
+
+    // Move cursor to next line after insertion
+    try {
+      const nextLine = Math.min(model.getLineCount() + 1, targetLine + 1);
+      editor.setPosition({ lineNumber: nextLine, column: 1 });
+      editor.revealLineInCenterIfOutsideViewport(nextLine);
+    } catch {}
     
     // Clear trigger state
     setTriggerLineNumber(null);
     setAICommand('');
+  };
+
+  // Insert a temporary placeholder immediately so users see the image spot right away
+  const insertTemporaryImagePlaceholder = (lineNumber: number) => {
+    const editor = editorRef.current;
+    if (!editor || lineNumber == null) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const placeholder = `![Screenshot](capturing...)`;
+    const range = {
+      startLineNumber: lineNumber,
+      startColumn: 1,
+      endLineNumber: lineNumber,
+      endColumn: model.getLineMaxColumn(lineNumber)
+    };
+    editor.executeEdits('ai-screenshot-placeholder', [{ range, text: placeholder }]);
+
+    // Move cursor to next line after placeholder insertion
+    try {
+      const nextLine = Math.min(model.getLineCount() + 1, lineNumber + 1);
+      editor.setPosition({ lineNumber: nextLine, column: 1 });
+      editor.revealLineInCenterIfOutsideViewport(nextLine);
+    } catch {}
   };
   
   // Handle potential AI trigger on content change
@@ -616,14 +681,26 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       // Set the trigger state
       setTriggerLineNumber(previousLineNumber);
       setAICommand(command);
+
+      // Only show AI window when there is a non-empty command
+      if (command.length > 0) {
+        setIsAIWindowCollapsed(false);
+        setShowAIWindow(true);
+        // Ensure visible right away
+        ensureAIVisible();
+      } else {
+        // Insert a temporary placeholder immediately so users see the position
+        try { insertTemporaryImagePlaceholder(previousLineNumber); } catch {}
+      }
       
-      // Pass the command directly to avoid stale closure issues
+      // Debounce screenshot capture to next tick to ensure UI updates first
+      // Do not set isCapturingScreenshot here; let the handler manage it to avoid early skip
       setTimeout(() => {
         handleScreenshotCaptureWithCommand(previousLineNumber, command);
       }, 50);
     }
   };
-  
+
   // Copy screenshot to clipboard
   const handleCopyScreenshot = async (screenshotPath: string) => {
     try {
@@ -725,7 +802,6 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       
       <div className="floating-window" style={{
       width: '100%',
-      height: showAIWindow ? `${baseWindowHeight}px` : '100%',
       backgroundColor: '#1f2937',
       borderRadius: showAIWindow ? '8px 8px 0 0' : '8px',
       boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
@@ -734,7 +810,12 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       position: 'relative',
       border: '1px solid rgba(75, 85, 99, 0.5)',
       borderBottom: showAIWindow ? 'none' : '1px solid rgba(75, 85, 99, 0.5)',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      // Flex sizing to allow responsive split with AI panel
+      flex: showAIWindow
+        ? (isAIWindowCollapsed ? '1 1 auto' : `${1 - aiWindowExpandedRatio} 1 0%`)
+        : '1 1 auto',
+      minHeight: showAIWindow ? `${baseWindowHeight}px` : undefined,
     }}>
       {/* Top Toolbar - Make it draggable */}
       <div className="toolbar" style={{
@@ -1062,9 +1143,11 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     {showAIWindow && (
       <div style={{
         width: '100%',
-        height: `${isAIWindowCollapsed ? aiWindowCollapsedHeight : aiWindowExpandedHeight}px`,
-        position: 'relative'
-      }}>
+        position: 'relative',
+        // Collapsed: fixed 40px; Expanded: take ratio of remaining height
+        flex: isAIWindowCollapsed ? `0 0 ${aiWindowCollapsedHeight}px` : `${aiWindowExpandedRatio} 1 0%`,
+        minHeight: isAIWindowCollapsed ? undefined : `${aiWindowExpandedMinHeight}px`,
+      }} ref={aiContainerRef}>
         <FloatingAIWindow
           isVisible={showAIWindow}
           onToggle={() => setShowAIWindow(!showAIWindow)}

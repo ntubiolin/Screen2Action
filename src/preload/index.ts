@@ -94,7 +94,7 @@ export interface ElectronAPI {
   screenshot: {
     capture: (options?: any) => Promise<string>;
     copy: (id: string) => Promise<void>;
-    save: (id: string, path: string) => Promise<void>;
+    save: (id: string, path: string) => Promise<string>;
   };
   sources: {
     getDesktopSources: () => Promise<any[]>;
@@ -123,6 +123,7 @@ export interface ElectronAPI {
     openFloatingWindow: () => Promise<boolean>;
     closeFloatingWindow: () => Promise<boolean>;
     expandToMainWindow: (sessionId?: string, notes?: string) => Promise<boolean>;
+    resizeFloatingWindow: (width: number, height: number) => Promise<boolean>;
   };
   settings: {
     getRecordingsDir: () => Promise<string>;
