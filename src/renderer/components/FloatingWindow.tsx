@@ -413,7 +413,65 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     decorationIdsRef.current = newDecorationIds;
   };
   
-  // Handle screenshot capture
+  // Handle screenshot capture with command passed directly
+  const handleScreenshotCaptureWithCommand = async (lineNumber: number, command: string) => {
+    console.log('handleScreenshotCaptureWithCommand called:', { lineNumber, command, isCapturingScreenshot });
+    
+    if (isCapturingScreenshot || lineNumber === null) {
+      console.log('Skipping capture:', { isCapturingScreenshot, lineNumber });
+      return;
+    }
+    
+    setIsCapturingScreenshot(true);
+    try {
+      // Create user_screenshots directory path with timestamp
+      const now = new Date();
+      const timestamp = `${now.getFullYear().toString().slice(-2)}_${
+        (now.getMonth() + 1).toString().padStart(2, '0')}_${
+        now.getDate().toString().padStart(2, '0')}_${
+        now.getHours().toString().padStart(2, '0')}_${
+        now.getMinutes().toString().padStart(2, '0')}_${
+        now.getSeconds().toString().padStart(2, '0')}`;
+      
+      console.log('Capturing screenshot with timestamp:', timestamp);
+      
+      // Capture screenshot
+      const screenshotId = await window.electronAPI.screenshot.capture({ 
+        fullScreen: true,
+        userInitiated: true,
+        filename: `user_screenshot_${timestamp}.png`
+      });
+      
+      // Get the screenshot path
+      const screenshotPath = await window.electronAPI.screenshot.save(
+        screenshotId, 
+        `user_screenshots/user_screenshot_${timestamp}.png`
+      );
+      
+      console.log('Screenshot saved:', screenshotPath);
+      setAIScreenshotPath(screenshotPath);
+      
+      // Check if there's a command (anything after !!!)
+      // Show AI window if there's any text
+      if (command && command.length > 0) {
+        console.log('Showing AI window with command:', command);
+        setShowAIWindow(true);
+      } else {
+        console.log('No command, inserting screenshot directly');
+        // No command, directly insert screenshot into markdown
+        insertScreenshotIntoMarkdown(screenshotPath, lineNumber);
+      }
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error);
+      // Reset trigger state on error
+      setTriggerLineNumber(null);
+      setAICommand('');
+    } finally {
+      setIsCapturingScreenshot(false);
+    }
+  };
+  
+  // Handle screenshot capture (for backward compatibility if needed)
   const handleScreenshotCapture = async () => {
     console.log('handleScreenshotCapture called:', { triggerLineNumber, aiCommand, isCapturingScreenshot });
     
@@ -459,7 +517,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       } else {
         console.log('No command, inserting screenshot directly');
         // No command, directly insert screenshot into markdown
-        insertScreenshotIntoMarkdown(screenshotPath);
+        insertScreenshotIntoMarkdown(screenshotPath, lineNumber);
       }
     } catch (error) {
       console.error('Failed to capture screenshot:', error);
@@ -472,9 +530,10 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   };
   
   // Insert screenshot into markdown editor
-  const insertScreenshotIntoMarkdown = (screenshotPath: string) => {
+  const insertScreenshotIntoMarkdown = (screenshotPath: string, lineNumber?: number) => {
     const editor = editorRef.current;
-    if (!editor || triggerLineNumber === null) return;
+    const targetLine = lineNumber ?? triggerLineNumber;
+    if (!editor || targetLine === null) return;
     
     const model = editor.getModel();
     if (!model) return;
@@ -484,10 +543,10 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     
     // Replace the trigger line with the image
     const range = {
-      startLineNumber: triggerLineNumber,
+      startLineNumber: targetLine,
       startColumn: 1,
-      endLineNumber: triggerLineNumber,
-      endColumn: model.getLineMaxColumn(triggerLineNumber)
+      endLineNumber: targetLine,
+      endColumn: model.getLineMaxColumn(targetLine)
     };
     
     editor.executeEdits('ai-screenshot', [{
@@ -527,13 +586,13 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       const command = match[1] ? match[1].trim() : '';
       console.log('AI trigger detected:', { line: previousLineNumber, command });
       
-      // Set the trigger state and capture screenshot
+      // Set the trigger state
       setTriggerLineNumber(previousLineNumber);
       setAICommand(command);
       
-      // Schedule screenshot capture after a brief delay to ensure state is set
+      // Pass the command directly to avoid stale closure issues
       setTimeout(() => {
-        handleScreenshotCapture();
+        handleScreenshotCaptureWithCommand(previousLineNumber, command);
       }, 50);
     }
   };
