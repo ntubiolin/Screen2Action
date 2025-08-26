@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { useRecordingStore } from '../store/recordingStore';
+import { FloatingAIWindow } from './FloatingAIWindow';
 
 interface FloatingWindowProps {
   onExpand: (sessionId?: string, notes?: string) => void;
@@ -24,6 +25,13 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const [sources, setSources] = useState<any[]>([]);
   const [conversionMessage, setConversionMessage] = useState<string>('');
   
+  // AI Window state
+  const [showAIWindow, setShowAIWindow] = useState(false);
+  const [aiScreenshotPath, setAIScreenshotPath] = useState<string | null>(null);
+  const [aiCommand, setAICommand] = useState<string>('');
+  const [triggerLineNumber, setTriggerLineNumber] = useState<number | null>(null);
+  const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
+  
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
@@ -31,11 +39,15 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const headingTsRef = useRef<Record<string, number>>({});
   const prevHeadingKeysRef = useRef<string[]>([]);
   const contentWidgetsRef = useRef<any[]>([]);
+  const decorationIdsRef = useRef<string[]>([]);
   
   const { addNote, clearNotes, setRecordingDuration } = useRecordingStore();
   
   // Heading detection regex
   const headingLineRegex = /^#{1,6}\s+/;
+  
+  // AI trigger detection regex
+  const aiTriggerRegex = /^!!!(.*)$/;
 
   // Load screen sources on mount
   useEffect(() => {
@@ -352,6 +364,157 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     }
   };
 
+  // Detect and handle AI trigger (!!!)
+  const detectAITrigger = (text: string) => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) return;
+    
+    const lines = text.split('\n');
+    const newDecorationIds: string[] = [];
+    
+    lines.forEach((line, index) => {
+      const match = line.match(aiTriggerRegex);
+      if (match) {
+        const lineNumber = index + 1;
+        const command = match[1].trim();
+        
+        // Highlight the !!! in red
+        const decoration = {
+          range: new monaco.Range(lineNumber, 1, lineNumber, 4),
+          options: {
+            inlineClassName: 'ai-trigger-highlight'
+          }
+        };
+        
+        const decorationId = editor.deltaDecorations([], [decoration])[0];
+        newDecorationIds.push(decorationId);
+        
+        // Store the trigger line and command
+        if (!isCapturingScreenshot) {
+          setTriggerLineNumber(lineNumber);
+          setAICommand(command);
+        }
+      }
+    });
+    
+    // Clear old decorations and apply new ones
+    if (decorationIdsRef.current.length > 0) {
+      editor.deltaDecorations(decorationIdsRef.current, []);
+    }
+    decorationIdsRef.current = newDecorationIds;
+  };
+  
+  // Handle screenshot capture
+  const handleScreenshotCapture = async () => {
+    if (isCapturingScreenshot) return;
+    
+    setIsCapturingScreenshot(true);
+    try {
+      // Create user_screenshots directory path with timestamp
+      const now = new Date();
+      const timestamp = `${now.getFullYear().toString().slice(-2)}_${
+        (now.getMonth() + 1).toString().padStart(2, '0')}_${
+        now.getDate().toString().padStart(2, '0')}_${
+        now.getHours().toString().padStart(2, '0')}_${
+        now.getMinutes().toString().padStart(2, '0')}_${
+        now.getSeconds().toString().padStart(2, '0')}`;
+      
+      // Capture screenshot
+      const screenshotId = await window.electronAPI.screenshot.capture({ 
+        fullScreen: true,
+        userInitiated: true,
+        filename: `user_screenshot_${timestamp}.png`
+      });
+      
+      // Get the screenshot path
+      const screenshotPath = await window.electronAPI.screenshot.save(
+        screenshotId, 
+        `user_screenshots/user_screenshot_${timestamp}.png`
+      );
+      
+      setAIScreenshotPath(screenshotPath);
+      
+      // If there's a command, show AI window
+      if (aiCommand) {
+        setShowAIWindow(true);
+      } else {
+        // No command, directly insert screenshot into markdown
+        insertScreenshotIntoMarkdown(screenshotPath);
+      }
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error);
+    } finally {
+      setIsCapturingScreenshot(false);
+    }
+  };
+  
+  // Insert screenshot into markdown editor
+  const insertScreenshotIntoMarkdown = (screenshotPath: string) => {
+    const editor = editorRef.current;
+    if (!editor || triggerLineNumber === null) return;
+    
+    const model = editor.getModel();
+    if (!model) return;
+    
+    // Create markdown image syntax
+    const markdownImage = `![Screenshot](file://${screenshotPath})`;
+    
+    // Replace the trigger line with the image
+    const range = {
+      startLineNumber: triggerLineNumber,
+      startColumn: 1,
+      endLineNumber: triggerLineNumber,
+      endColumn: model.getLineMaxColumn(triggerLineNumber)
+    };
+    
+    editor.executeEdits('ai-screenshot', [{
+      range,
+      text: markdownImage
+    }]);
+    
+    // Clear trigger state
+    setTriggerLineNumber(null);
+    setAICommand('');
+  };
+  
+  // Handle Enter key press
+  const handleEnterKey = (e: any) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    
+    const position = editor.getPosition();
+    if (!position) return;
+    
+    const model = editor.getModel();
+    if (!model) return;
+    
+    const lineContent = model.getLineContent(position.lineNumber);
+    const match = lineContent.match(aiTriggerRegex);
+    
+    if (match) {
+      // Prevent default Enter behavior
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Trigger screenshot capture
+      handleScreenshotCapture();
+      return false;
+    }
+    
+    return true;
+  };
+  
+  // Copy screenshot to clipboard
+  const handleCopyScreenshot = async (screenshotPath: string) => {
+    try {
+      // Extract the screenshot ID from the path if needed
+      await window.electronAPI.screenshot.copy(screenshotPath);
+    } catch (error) {
+      console.error('Failed to copy screenshot:', error);
+    }
+  };
+  
   const handleEditorMount = (editor: any, monaco: any) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
@@ -361,8 +524,13 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     try { updateHeadingTimestamps(notes || ''); } catch {}
     
     editor.onDidChangeModelContent(() => {
-      updateHeadingTimestamps(editor.getValue());
+      const content = editor.getValue();
+      updateHeadingTimestamps(content);
+      detectAITrigger(content);
     });
+    
+    // Add Enter key handler for AI trigger
+    editor.addCommand(monaco.KeyCode.Enter, handleEnterKey, '!');
     
     // Add keyboard shortcut for Ctrl/Cmd+M
     editor.addAction({
@@ -380,7 +548,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
 
   return (
     <>
-      {/* Inject styles for timestamp chips */}
+      {/* Inject styles for timestamp chips and AI trigger */}
       <style>{`
         .s2a-ts-chip { 
           position: absolute; 
@@ -398,6 +566,10 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
           box-shadow: 0 1px 2px rgba(0,0,0,0.25);
         }
         .s2a-ts-placeholder { opacity: 0.6; }
+        .ai-trigger-highlight {
+          color: #ef4444 !important;
+          font-weight: bold;
+        }
       `}</style>
       
       {/* Audio conversion message */}
@@ -733,6 +905,16 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         )}
       </div>
     </div>
+    
+    {/* Floating AI Window */}
+    <FloatingAIWindow
+      isVisible={showAIWindow}
+      onToggle={() => setShowAIWindow(!showAIWindow)}
+      screenshotPath={aiScreenshotPath}
+      command={aiCommand}
+      onInsertScreenshot={insertScreenshotIntoMarkdown}
+      onCopyScreenshot={handleCopyScreenshot}
+    />
     </>
   );
 };
