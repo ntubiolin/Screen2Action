@@ -11,6 +11,7 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 - Recording controls with timer display
 - Settings popover for output path and audio configuration
 - One-click expand to full review window
+- **AI-powered screenshot capture**: Type `!!!` followed by a command to capture and analyze screenshots
 
 ### 🎥 Meeting Recording + Content-Aligned Playback
 - Synchronized screen, audio, and note recording
@@ -31,10 +32,28 @@ A productivity tool combining screen recording, smart screenshots, and AI assist
 
 ### 📸 Smart Screenshots + Command Operations
 - Hotkey screenshots (⌘+Shift+S)
-- Natural language command processing
+- **AI-triggered screenshots**: Type `!!!` in floating window to capture screen
+- Natural language command processing with visual grounding
 - Support for annotation, save, copy operations
+- **Advanced image manipulation**:
+  - Automatic bounding box detection and annotation
+  - Smart cropping based on content detection
+  - Arrow annotations for highlighting specific elements
 - OCR text recognition
 - MCP (Model Context Protocol) tool integration
+
+### 🤖 Floating AI Window
+- **Intelligent screenshot assistant** that appears below the floating markdown window
+- **AI-powered screenshot analysis**:
+  - Natural language commands for image manipulation
+  - Visual grounding capabilities for element detection
+  - Support for complex queries like "highlight the main chart" or "crop the navigation bar"
+- **Interactive chat interface** for continuous conversation about screenshots
+- **One-click actions**:
+  - Insert processed screenshots into markdown notes
+  - Copy screenshots to clipboard
+  - Preview screenshots in full-screen mode
+- **Collapsible design** to minimize screen space when not in use
 
 ### 📁 File Management
 - Custom output path selection for recordings
@@ -221,10 +240,70 @@ npm run build
 npm run dist
 ```
 
-### Run Tests
+### Build DMG Installer (macOS)
+
+To create a distributable DMG installer:
 
 ```bash
+npm run build:dmg
+```
+
+This creates a complete installer that bundles both the frontend and Python backend. Users can:
+1. Download and open the DMG file
+2. Drag Screen2Action to Applications folder
+3. Launch the app and configure API keys via Settings menu
+
+See [DMG Build Guide](docs/DMG_BUILD_GUIDE.md) for detailed instructions.
+
+### Run Tests
+
+#### Frontend Tests
+```bash
+# Run all frontend tests
 npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage
+npm run test:coverage
+```
+
+#### Backend Tests
+```bash
+# Run all backend tests
+cd backend
+uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov=app --cov-report=html
+
+# Run specific test file
+uv run pytest tests/test_recording_service.py
+
+# Run tests with verbose output
+uv run pytest -v
+
+# Run tests with specific markers
+uv run pytest -m "not slow"
+```
+
+#### End-to-End Tests
+```bash
+# Run E2E tests (requires both frontend and backend running)
+npm run test:e2e
+
+# Run E2E tests in headless mode
+npm run test:e2e:headless
+```
+
+#### Integration Tests
+```bash
+# Test review page with mock data
+npm run test:review:full
+
+# Test with specific session
+./test-review-full.sh YOUR_SESSION_ID
 ```
 
 ### Code Style

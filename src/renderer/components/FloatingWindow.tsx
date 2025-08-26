@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { useRecordingStore } from '../store/recordingStore';
+import { FloatingAIWindow } from './FloatingAIWindow';
 
 interface FloatingWindowProps {
   onExpand: (sessionId?: string, notes?: string) => void;
@@ -24,6 +25,18 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const [sources, setSources] = useState<any[]>([]);
   const [conversionMessage, setConversionMessage] = useState<string>('');
   
+  // AI Window state
+  const [showAIWindow, setShowAIWindow] = useState(false);
+  const [isAIWindowCollapsed, setIsAIWindowCollapsed] = useState(false);
+  const baseWindowHeight = 300; // minimum height for the editor panel when AI is visible
+  const aiWindowExpandedMinHeight = 260; // minimum height for the AI panel when expanded
+  const aiWindowCollapsedHeight = 40; // Just the header height
+  const aiWindowExpandedRatio = 0.5; // default portion of window height allocated to AI when expanded
+  const [aiScreenshotPath, setAIScreenshotPath] = useState<string | null>(null);
+  const [aiCommand, setAICommand] = useState<string>('');
+  const [triggerLineNumber, setTriggerLineNumber] = useState<number | null>(null);
+  const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
+  
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
@@ -31,16 +44,70 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const headingTsRef = useRef<Record<string, number>>({});
   const prevHeadingKeysRef = useRef<string[]>([]);
   const contentWidgetsRef = useRef<any[]>([]);
+  const decorationIdsRef = useRef<string[]>([]);
+  const aiContainerRef = useRef<HTMLDivElement | null>(null);
   
   const { addNote, clearNotes, setRecordingDuration } = useRecordingStore();
   
   // Heading detection regex
   const headingLineRegex = /^#{1,6}\s+/;
+  
+  // AI trigger detection regex
+  const aiTriggerRegex = /^\s*!!!\s*(.*)$/;
 
   // Load screen sources on mount
   useEffect(() => {
     loadSources();
   }, []);
+  
+  // Ensure a minimum window size when AI window is toggled or collapsed
+  useEffect(() => {
+    const ensureMinSize = async () => {
+      try {
+        if (!showAIWindow) return;
+        const minTotal = baseWindowHeight + (isAIWindowCollapsed ? aiWindowCollapsedHeight : aiWindowExpandedMinHeight);
+        const currentHeight = Math.floor(window.innerHeight || 0);
+        if (currentHeight < minTotal) {
+          const currentWidth = Math.max(300, Math.floor(window.innerWidth || 400));
+          await window.electronAPI.window.resizeFloatingWindow(currentWidth, minTotal);
+        }
+      } catch (error) {
+        console.error('Failed to ensure floating window size:', error);
+      }
+    };
+
+    ensureMinSize();
+  }, [showAIWindow, isAIWindowCollapsed]);
+
+  // Helper: ensure AI panel is visible (resize + scroll)
+  const ensureAIVisible = async () => {
+    try {
+      const currentWidth = Math.max(300, Math.floor(window.innerWidth || 400));
+      const minTotal = baseWindowHeight + (isAIWindowCollapsed ? aiWindowCollapsedHeight : aiWindowExpandedMinHeight);
+      const currentHeight = Math.floor(window.innerHeight || 0);
+      if (currentHeight < minTotal) {
+        await window.electronAPI.window.resizeFloatingWindow(currentWidth, minTotal);
+      }
+      // After potential resize, scroll the AI container into view
+      requestAnimationFrame(() => {
+        aiContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        // Fallback: scroll window to bottom
+        try {
+          const doc = document.documentElement;
+          window.scrollTo({ top: doc.scrollHeight, behavior: 'smooth' });
+        } catch {}
+      });
+    } catch (e) {
+      console.error('ensureAIVisible failed', e);
+    }
+  };
+
+  // Also run ensureAIVisible whenever AI window becomes visible or collapse state changes
+  useEffect(() => {
+    if (showAIWindow) {
+      ensureAIVisible();
+    }
+  }, [showAIWindow, isAIWindowCollapsed]);
 
   // Timer for recording duration and screenshot count update
   useEffect(() => {
@@ -352,6 +419,298 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     }
   };
 
+  // Detect and handle AI trigger (!!!)
+  const detectAITrigger = (text: string) => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) return;
+    
+    const lines = text.split('\n');
+    const newDecorationIds: string[] = [];
+    let foundTrigger = false;
+    
+    lines.forEach((line, index) => {
+      const match = line.match(aiTriggerRegex);
+      if (match) {
+        const lineNumber = index + 1;
+        const command = match[1].trim();
+        
+        // Highlight the !!! in red
+        const decoration = {
+          range: new monaco.Range(lineNumber, 1, lineNumber, 4),
+          options: {
+            inlineClassName: 'ai-trigger-highlight'
+          }
+        };
+        
+        const decorationId = editor.deltaDecorations([], [decoration])[0];
+        newDecorationIds.push(decorationId);
+        
+        // Store the trigger line and command
+        if (!isCapturingScreenshot && !foundTrigger) {
+          setTriggerLineNumber(lineNumber);
+          setAICommand(command);
+          foundTrigger = true;
+        }
+      }
+    });
+    
+    // Clear trigger state if no trigger found
+    if (!foundTrigger && !isCapturingScreenshot) {
+      setTriggerLineNumber(null);
+      setAICommand('');
+    }
+    
+    // Clear old decorations and apply new ones
+    if (decorationIdsRef.current.length > 0) {
+      editor.deltaDecorations(decorationIdsRef.current, []);
+    }
+    decorationIdsRef.current = newDecorationIds;
+  };
+  
+  // Handle screenshot capture with command passed directly
+  const handleScreenshotCaptureWithCommand = async (lineNumber: number, command: string) => {
+    console.log('handleScreenshotCaptureWithCommand called:', { lineNumber, command, isCapturingScreenshot });
+    
+    if (isCapturingScreenshot || lineNumber === null) {
+      console.log('Skipping capture:', { isCapturingScreenshot, lineNumber });
+      return;
+    }
+    
+    setIsCapturingScreenshot(true);
+    try {
+      // Create user_screenshots directory path with timestamp
+      const now = new Date();
+      const timestamp = `${now.getFullYear().toString().slice(-2)}_${
+        (now.getMonth() + 1).toString().padStart(2, '0')}_${
+        now.getDate().toString().padStart(2, '0')}_${
+        now.getHours().toString().padStart(2, '0')}_${
+        now.getMinutes().toString().padStart(2, '0')}_${
+        now.getSeconds().toString().padStart(2, '0')}`;
+      
+      console.log('Capturing screenshot with timestamp:', timestamp);
+      
+      // Capture screenshot
+      const screenshotId = await window.electronAPI.screenshot.capture({ 
+        fullScreen: true,
+        userInitiated: true,
+        filename: `user_screenshot_${timestamp}.png`
+      });
+      
+      // Get the screenshot path
+      const screenshotPath = await window.electronAPI.screenshot.save(
+        screenshotId, 
+        `user_screenshots/user_screenshot_${timestamp}.png`
+      );
+      
+      console.log('Screenshot saved:', screenshotPath);
+      setAIScreenshotPath(screenshotPath);
+      
+      // Check if there's a command (anything after !!!)
+      // Show AI window if there's any text
+      if (command && command.length > 0) {
+        console.log('Showing AI window with command:', command);
+        setShowAIWindow(true);
+      } else {
+        console.log('No command, inserting screenshot directly');
+        // Use the provided line number to avoid relying on mutable state
+        insertScreenshotIntoMarkdown(screenshotPath, lineNumber);
+      }
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error);
+      // Reset trigger state on error
+      setTriggerLineNumber(null);
+      setAICommand('');
+    } finally {
+      setIsCapturingScreenshot(false);
+    }
+  };
+  
+  // Handle AI window collapse state change
+  const handleAIWindowCollapseChange = (collapsed: boolean) => {
+    console.log('AI window collapse state changed:', collapsed);
+    setIsAIWindowCollapsed(collapsed);
+  };
+  
+  // Handle screenshot capture (for backward compatibility if needed)
+  const handleScreenshotCapture = async () => {
+    console.log('handleScreenshotCapture called:', { triggerLineNumber, aiCommand, isCapturingScreenshot });
+    
+    if (isCapturingScreenshot || triggerLineNumber === null) {
+      console.log('Skipping capture:', { isCapturingScreenshot, triggerLineNumber });
+      return;
+    }
+    
+    setIsCapturingScreenshot(true);
+    try {
+      // Create user_screenshots directory path with timestamp
+      const now = new Date();
+      const timestamp = `${now.getFullYear().toString().slice(-2)}_${
+        (now.getMonth() + 1).toString().padStart(2, '0')}_${
+        now.getDate().toString().padStart(2, '0')}_${
+        now.getHours().toString().padStart(2, '0')}_${
+        now.getMinutes().toString().padStart(2, '0')}_${
+        now.getSeconds().toString().padStart(2, '0')}`;
+      
+      console.log('Capturing screenshot with timestamp:', timestamp);
+      
+      // Capture screenshot
+      const screenshotId = await window.electronAPI.screenshot.capture({ 
+        fullScreen: true,
+        userInitiated: true,
+        filename: `user_screenshot_${timestamp}.png`
+      });
+      
+      // Get the screenshot path
+      const screenshotPath = await window.electronAPI.screenshot.save(
+        screenshotId, 
+        `user_screenshots/user_screenshot_${timestamp}.png`
+      );
+      
+      console.log('Screenshot saved:', screenshotPath);
+      setAIScreenshotPath(screenshotPath);
+      
+      // Check if there's a command (anything after !!!)
+      // Show AI window if there's any text, even just for viewing the screenshot
+      if (aiCommand && aiCommand.length > 0) {
+        console.log('Showing AI window with command:', aiCommand);
+        setShowAIWindow(true);
+      } else {
+        console.log('No command, inserting screenshot directly');
+        // No command, directly insert screenshot into markdown at the exact trigger line
+        insertScreenshotIntoMarkdown(screenshotPath, triggerLineNumber);
+      }
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error);
+      // Reset trigger state on error
+      setTriggerLineNumber(null);
+      setAICommand('');
+    } finally {
+      setIsCapturingScreenshot(false);
+    }
+  };
+  
+  // Insert screenshot into markdown editor
+  const insertScreenshotIntoMarkdown = (screenshotPath: string, lineNumber?: number) => {
+    const editor = editorRef.current;
+    const targetLine = lineNumber ?? triggerLineNumber;
+    if (!editor || targetLine === null) return;
+    
+    const model = editor.getModel();
+    if (!model) return;
+    
+    // Create markdown image syntax
+    const markdownImage = `![Screenshot](file://${screenshotPath})`;
+    
+    // Replace the trigger line with the image
+    const range = {
+      startLineNumber: targetLine,
+      startColumn: 1,
+      endLineNumber: targetLine,
+      endColumn: model.getLineMaxColumn(targetLine)
+    };
+    
+    editor.executeEdits('ai-screenshot', [{
+      range,
+      text: markdownImage
+    }]);
+
+    // Move cursor to next line after insertion
+    try {
+      const nextLine = Math.min(model.getLineCount() + 1, targetLine + 1);
+      editor.setPosition({ lineNumber: nextLine, column: 1 });
+      editor.revealLineInCenterIfOutsideViewport(nextLine);
+    } catch {}
+    
+    // Clear trigger state
+    setTriggerLineNumber(null);
+    setAICommand('');
+  };
+
+  // Insert a temporary placeholder immediately so users see the image spot right away
+  const insertTemporaryImagePlaceholder = (lineNumber: number) => {
+    const editor = editorRef.current;
+    if (!editor || lineNumber == null) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const placeholder = `![Screenshot](capturing...)`;
+    const range = {
+      startLineNumber: lineNumber,
+      startColumn: 1,
+      endLineNumber: lineNumber,
+      endColumn: model.getLineMaxColumn(lineNumber)
+    };
+    editor.executeEdits('ai-screenshot-placeholder', [{ range, text: placeholder }]);
+
+    // Move cursor to next line after placeholder insertion
+    try {
+      const nextLine = Math.min(model.getLineCount() + 1, lineNumber + 1);
+      editor.setPosition({ lineNumber: nextLine, column: 1 });
+      editor.revealLineInCenterIfOutsideViewport(nextLine);
+    } catch {}
+  };
+  
+  // Handle potential AI trigger on content change
+  const checkForAITriggerOnEnter = (editor: any, changes: any) => {
+    // Check if Enter key was pressed
+    const hasEnter = changes.some((change: any) => 
+      change.text.includes('\n')
+    );
+    
+    if (!hasEnter) return;
+    
+    const position = editor.getPosition();
+    if (!position) return;
+    
+    const model = editor.getModel();
+    if (!model) return;
+    
+    // Check the previous line (before the new line)
+    const previousLineNumber = position.lineNumber - 1;
+    if (previousLineNumber < 1) return;
+    
+    const previousLineContent = model.getLineContent(previousLineNumber);
+    const match = previousLineContent.match(aiTriggerRegex);
+    
+    if (match) {
+      // We found a trigger on the previous line
+      const command = match[1] ? match[1].trim() : '';
+      console.log('AI trigger detected:', { line: previousLineNumber, command });
+      
+      // Set the trigger state
+      setTriggerLineNumber(previousLineNumber);
+      setAICommand(command);
+
+      // Only show AI window when there is a non-empty command
+      if (command.length > 0) {
+        setIsAIWindowCollapsed(false);
+        setShowAIWindow(true);
+        // Ensure visible right away
+        ensureAIVisible();
+      } else {
+        // Insert a temporary placeholder immediately so users see the position
+        try { insertTemporaryImagePlaceholder(previousLineNumber); } catch {}
+      }
+      
+      // Debounce screenshot capture to next tick to ensure UI updates first
+      // Do not set isCapturingScreenshot here; let the handler manage it to avoid early skip
+      setTimeout(() => {
+        handleScreenshotCaptureWithCommand(previousLineNumber, command);
+      }, 50);
+    }
+  };
+
+  // Copy screenshot to clipboard
+  const handleCopyScreenshot = async (screenshotPath: string) => {
+    try {
+      // Extract the screenshot ID from the path if needed
+      await window.electronAPI.screenshot.copy(screenshotPath);
+    } catch (error) {
+      console.error('Failed to copy screenshot:', error);
+    }
+  };
+  
   const handleEditorMount = (editor: any, monaco: any) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
@@ -360,9 +719,17 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     // Initialize prev keys so only new headings get timestamps while recording
     try { updateHeadingTimestamps(notes || ''); } catch {}
     
-    editor.onDidChangeModelContent(() => {
-      updateHeadingTimestamps(editor.getValue());
+    editor.onDidChangeModelContent((e: any) => {
+      const content = editor.getValue();
+      updateHeadingTimestamps(content);
+      detectAITrigger(content);
+      
+      // Check for AI trigger when Enter is pressed
+      checkForAITriggerOnEnter(editor, e.changes);
     });
+    
+    // Don't override the Enter key - let Monaco handle it normally
+    // We'll detect the trigger through content changes instead
     
     // Add keyboard shortcut for Ctrl/Cmd+M
     editor.addAction({
@@ -379,8 +746,15 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   };
 
   return (
-    <>
-      {/* Inject styles for timestamp chips */}
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      width: '100%',
+      height: '100%',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
+      {/* Inject styles for timestamp chips and AI trigger */}
       <style>{`
         .s2a-ts-chip { 
           position: absolute; 
@@ -398,6 +772,10 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
           box-shadow: 0 1px 2px rgba(0,0,0,0.25);
         }
         .s2a-ts-placeholder { opacity: 0.6; }
+        .ai-trigger-highlight {
+          color: #ef4444 !important;
+          font-weight: bold;
+        }
       `}</style>
       
       {/* Audio conversion message */}
@@ -424,15 +802,20 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       
       <div className="floating-window" style={{
       width: '100%',
-      height: '100%',
       backgroundColor: '#1f2937',
-      borderRadius: '8px',
+      borderRadius: showAIWindow ? '8px 8px 0 0' : '8px',
       boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
       display: 'flex',
       flexDirection: 'column',
       position: 'relative',
       border: '1px solid rgba(75, 85, 99, 0.5)',
-      overflow: 'hidden'
+      borderBottom: showAIWindow ? 'none' : '1px solid rgba(75, 85, 99, 0.5)',
+      overflow: 'hidden',
+      // Flex sizing to allow responsive split with AI panel
+      flex: showAIWindow
+        ? (isAIWindowCollapsed ? '1 1 auto' : `${1 - aiWindowExpandedRatio} 1 0%`)
+        : '1 1 auto',
+      minHeight: showAIWindow ? `${baseWindowHeight}px` : undefined,
     }}>
       {/* Top Toolbar - Make it draggable */}
       <div className="toolbar" style={{
@@ -713,6 +1096,28 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
           }}></span>
           Normal
         </span>
+        
+        {/* AI Window Toggle */}
+        {aiScreenshotPath && (
+          <button
+            onClick={() => setShowAIWindow(!showAIWindow)}
+            style={{
+              backgroundColor: showAIWindow ? '#6366f1' : 'transparent',
+              color: showAIWindow ? 'white' : '#9ca3af',
+              border: '1px solid rgba(99, 102, 241, 0.5)',
+              borderRadius: '4px',
+              padding: '2px 6px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+            title={showAIWindow ? 'Hide AI Assistant' : 'Show AI Assistant'}
+          >
+            🤖 AI
+          </button>
+        )}
 
         {/* Expand button when recording is stopped */}
         {isReadOnly && (
@@ -733,6 +1138,27 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         )}
       </div>
     </div>
-    </>
+    
+    {/* Floating AI Window - Now properly sized */}
+    {showAIWindow && (
+      <div style={{
+        width: '100%',
+        position: 'relative',
+        // Collapsed: fixed 40px; Expanded: take ratio of remaining height
+        flex: isAIWindowCollapsed ? `0 0 ${aiWindowCollapsedHeight}px` : `${aiWindowExpandedRatio} 1 0%`,
+        minHeight: isAIWindowCollapsed ? undefined : `${aiWindowExpandedMinHeight}px`,
+      }} ref={aiContainerRef}>
+        <FloatingAIWindow
+          isVisible={showAIWindow}
+          onToggle={() => setShowAIWindow(!showAIWindow)}
+          screenshotPath={aiScreenshotPath}
+          command={aiCommand}
+          onInsertScreenshot={insertScreenshotIntoMarkdown}
+          onCopyScreenshot={handleCopyScreenshot}
+          onCollapseChange={handleAIWindowCollapseChange}
+        />
+      </div>
+    )}
+    </div>
   );
 };

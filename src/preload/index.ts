@@ -47,10 +47,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFloatingWindow: () => ipcRenderer.invoke('open-floating-window'),
     closeFloatingWindow: () => ipcRenderer.invoke('close-floating-window'),
     expandToMainWindow: (sessionId?: string, notes?: string) => ipcRenderer.invoke('expand-to-main-window', sessionId, notes),
+    resizeFloatingWindow: (width: number, height: number) => ipcRenderer.invoke('resize-floating-window', width, height),
   },
   
   settings: {
     getRecordingsDir: () => ipcRenderer.invoke('get-recordings-dir'),
+  },
+
+  config: {
+    getAppConfig: () => ipcRenderer.invoke('get-app-config'),
+    getConfigValues: () => ipcRenderer.invoke('get-config-values'),
+    saveConfigValues: (values: Record<string, string>) => ipcRenderer.invoke('save-config-values', values),
+    selectDirectory: () => ipcRenderer.invoke('select-directory'),
+    getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   },
   
   // Event listeners
@@ -85,7 +94,7 @@ export interface ElectronAPI {
   screenshot: {
     capture: (options?: any) => Promise<string>;
     copy: (id: string) => Promise<void>;
-    save: (id: string, path: string) => Promise<void>;
+    save: (id: string, path: string) => Promise<string>;
   };
   sources: {
     getDesktopSources: () => Promise<any[]>;
@@ -114,9 +123,17 @@ export interface ElectronAPI {
     openFloatingWindow: () => Promise<boolean>;
     closeFloatingWindow: () => Promise<boolean>;
     expandToMainWindow: (sessionId?: string, notes?: string) => Promise<boolean>;
+    resizeFloatingWindow: (width: number, height: number) => Promise<boolean>;
   };
   settings: {
     getRecordingsDir: () => Promise<string>;
+  };
+  config: {
+    getAppConfig: () => Promise<any>;
+    getConfigValues: () => Promise<Record<string, string>>;
+    saveConfigValues: (values: Record<string, string>) => Promise<void>;
+    selectDirectory: () => Promise<string | null>;
+    getAppInfo: () => Promise<{ name: string; version: string; dataPath: string }>;
   };
   on: (channel: string, callback: Function) => void;
   removeListener: (channel: string, callback: Function) => void;

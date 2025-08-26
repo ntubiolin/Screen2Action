@@ -137,6 +137,8 @@ export class WebSocketServer extends EventEmitter {
         this.wss.on('connection', (ws) => {
           console.log('Python backend connected');
           this.clients.add(ws);
+          // Notify listeners that backend is connected
+          this.emit('backend-connected');
           
           ws.on('message', (data) => {
             try {
@@ -150,6 +152,8 @@ export class WebSocketServer extends EventEmitter {
           ws.on('close', () => {
             console.log('Python backend disconnected');
             this.clients.delete(ws);
+            // Notify listeners that backend disconnected
+            this.emit('backend-disconnected');
           });
           
           ws.on('error', (error) => {
@@ -252,6 +256,28 @@ export class WebSocketServer extends EventEmitter {
       } else {
         resolve();
       }
+    });
+  }
+  
+  async waitForBackendConnected(timeoutMs: number = 15000): Promise<boolean> {
+    if (Array.from(this.clients).some(c => c.readyState === WebSocket.OPEN)) {
+      return true;
+    }
+    return new Promise((resolve) => {
+      const onConnected = () => {
+        cleanup();
+        resolve(true);
+      };
+      const onTimeout = () => {
+        cleanup();
+        resolve(false);
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off('backend-connected', onConnected);
+      };
+      this.on('backend-connected', onConnected);
+      const timer = setTimeout(onTimeout, timeoutMs);
     });
   }
 }

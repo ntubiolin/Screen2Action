@@ -1,23 +1,40 @@
 import { app, BrowserWindow, ipcMain, desktopCapturer, dialog, Menu } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { WebSocketServer } from './websocket';
 import { RecordingManager } from './recording';
 import { ScreenshotManager } from './screenshot';
 import { getRecordingsDir } from './config';
+import { BackendManager } from './backend-manager';
+import { ConfigManager } from './config-manager';
+import { mainLogger } from './logger';
 
 // Enable live reload for Electron in development
-if (process.env.NODE_ENV !== 'production') {
-  // Path from dist/main to project root's node_modules
-  const electronPath = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'electron');
-  require('electron-reload')(path.join(__dirname, '..'), {
-    electron: electronPath,
-    hardResetMethod: 'exit'
-  });
+// Only load electron-reload in development and when not packaged
+if (process.env.NODE_ENV === 'development' && !app.isPackaged) {
+  try {
+    // Path from dist/main to project root's node_modules
+    const electronPath = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'electron');
+    require('electron-reload')(path.join(__dirname, '..'), {
+      electron: electronPath,
+      hardResetMethod: 'exit'
+    });
+  } catch (error) {
+    console.log('electron-reload not available in production');
+  }
 }
+
+// Log application startup
+mainLogger.info('Application starting', {
+  version: app.getVersion(),
+  platform: process.platform,
+  isPackaged: app.isPackaged,
+  appPath: app.getAppPath()
+});
 
 // Handle cleanup on process exit/restart
 process.on('SIGINT', async () => {
-  console.log('Received SIGINT, cleaning up...');
+  mainLogger.info('Received SIGINT, cleaning up...');
   if (wsServer) {
     await wsServer.stop();
     wsServer = null;
@@ -26,7 +43,7 @@ process.on('SIGINT', async () => {
 });
 
 process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM, cleaning up...');
+  mainLogger.info('Received SIGTERM, cleaning up...');
   if (wsServer) {
     await wsServer.stop();
     wsServer = null;
@@ -39,6 +56,8 @@ let floatingWindow: BrowserWindow | null = null;
 let wsServer: WebSocketServer | null = null;
 let recordingManager: RecordingManager | null = null;
 let screenshotManager: ScreenshotManager | null = null;
+let backendManager: BackendManager | null = null;
+let configManager: ConfigManager | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -104,6 +123,8 @@ function createFloatingWindow() {
 }
 
 app.whenReady().then(async () => {
+  mainLogger.info('App is ready, initializing...');
+  
   // Create application menu
   const template: any[] = [
     {
@@ -139,6 +160,25 @@ app.whenReady().then(async () => {
           label: 'Select All',
           accelerator: 'CmdOrCtrl+A',
           role: 'selectAll'
+        },
+        { type: 'separator' },
+        {
+          label: 'View Logs',
+          click: async () => {
+            const { shell } = require('electron');
+            const logPath = mainLogger.getLogPath();
+            mainLogger.info('Opening log file', { logPath });
+            shell.openPath(logPath);
+          }
+        },
+        {
+          label: 'Open Logs Folder',
+          click: async () => {
+            const { shell } = require('electron');
+            const logDir = path.dirname(mainLogger.getLogPath());
+            mainLogger.info('Opening logs folder', { logDir });
+            shell.openPath(logDir);
+          }
         }
       ]
     },
@@ -162,6 +202,65 @@ app.whenReady().then(async () => {
               createWindow();
             } else {
               mainWindow.focus();
+            }
+          }
+        },
+        {
+          label: 'Settings',
+          click: () => {
+            // Create settings window
+            const settingsWindow = new BrowserWindow({
+              width: 900,
+              height: 700,
+              minHeight: 600,
+              titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+              webPreferences: {
+                preload: path.join(__dirname, '../preload/index.js'),
+                contextIsolation: true,
+                nodeIntegration: false,
+              },
+            });
+
+            const isDev = !app.isPackaged;
+            const devBase = process.env.S2A_DEV_URL || 'http://localhost:3000';
+            const devUrl = `${devBase}?page=settings`;
+            const prodFile = path.join(__dirname, '../renderer/index.html');
+            const fs = require('fs');
+
+            const loadProd = () => {
+              if (fs.existsSync(prodFile)) {
+                mainLogger.info('Opening Settings window (prod file)', { prodFile });
+                settingsWindow.loadFile(prodFile, { hash: 'settings' });
+              } else {
+                mainLogger.error('Prod renderer file missing; cannot open Settings from file', { prodFile });
+              }
+            };
+
+            const loadDev = () => {
+              mainLogger.info('Opening Settings window (dev url)', { devUrl });
+              settingsWindow.loadURL(devUrl);
+              // Dev tools removed - can be opened manually with Ctrl+Shift+I or Cmd+Opt+I
+            };
+
+            settingsWindow.webContents.on('did-finish-load', () => {
+              mainLogger.info('Settings window did-finish-load');
+            });
+            settingsWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+              mainLogger.error('Settings window did-fail-load', { errorCode, errorDescription, validatedURL });
+              if (validatedURL && validatedURL.startsWith('http')) {
+                loadProd();
+              } else if (validatedURL && validatedURL.startsWith('file:')) {
+                loadDev();
+              }
+            });
+            settingsWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+              mainLogger.info('Settings console', { level, message, line, sourceId });
+            });
+
+            if (isDev) {
+              loadDev();
+            } else {
+              loadProd();
             }
           }
         },
@@ -206,32 +305,108 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(menu);
 
   // Start with floating window as default
+  mainLogger.info('Creating floating window...');
   createFloatingWindow();
   
   // Initialize managers
-  wsServer = new WebSocketServer();
-  recordingManager = new RecordingManager();
-  screenshotManager = new ScreenshotManager();
+  mainLogger.info('Initializing managers...');
+  try {
+    wsServer = new WebSocketServer();
+    mainLogger.info('WebSocketServer created');
+    recordingManager = new RecordingManager();
+    mainLogger.info('RecordingManager created');
+    screenshotManager = new ScreenshotManager();
+    mainLogger.info('ScreenshotManager created');
+    backendManager = new BackendManager();
+    mainLogger.info('BackendManager created');
+    configManager = new ConfigManager();
+    mainLogger.info('ConfigManager created');
+  } catch (error) {
+    mainLogger.error('Error initializing managers:', error);
+    throw error;
+  }
+
+  // Diagnostics: list logs dir and expected backend log path
+  try {
+    const logsDir = path.dirname(mainLogger.getLogPath());
+    const files = fs.existsSync(logsDir) ? fs.readdirSync(logsDir).filter(f => f.endsWith('.log')) : [];
+    const hasBackendMgr = files.some(f => f.startsWith('backend-manager-'));
+    const backendMgrLogPath = backendManager?.getLogPath();
+    mainLogger.info('Diagnostics/logs', { logsDir, files, hasBackendMgr, backendMgrLogPath });
+  } catch (e) {
+    mainLogger.warn('Diagnostics/logs failed', { error: String(e) });
+  }
+  
+  // IPC handler to get logs
+  ipcMain.handle('get-logs', async () => {
+    const logPath = mainLogger.getLogPath();
+    mainLogger.info('Log path requested', { logPath });
+    return {
+      logPath,
+      logDir: path.dirname(logPath)
+    };
+  });
+
+  // IPC handler to open logs folder
+  ipcMain.handle('open-logs-folder', async () => {
+    const { shell } = require('electron');
+    const logPath = mainLogger.getLogPath();
+    const logDir = path.dirname(logPath);
+    mainLogger.info('Opening logs folder', { logDir });
+    shell.openPath(logDir);
+    return logDir;
+  });
   
   // Start WebSocket server for Python backend communication
   try {
+    mainLogger.info('Starting WebSocket server on port 8765...');
     const wsStarted = await wsServer.start(8765);
     if (!wsStarted) {
-      console.error('WebSocket server failed to start on port 8765');
+      mainLogger.error('WebSocket server failed to start on port 8765');
       // Show a user-friendly error message
       dialog.showErrorBox(
         'WebSocket Server Error',
         'Failed to start WebSocket server on port 8765. The application may not function properly.'
       );
     } else {
-      console.log('WebSocket server started successfully on port 8765');
+      mainLogger.info('WebSocket server started successfully on port 8765');
     }
   } catch (error) {
-    console.error('Error starting WebSocket server:', error);
+    mainLogger.error('Error starting WebSocket server:', error);
     dialog.showErrorBox(
       'WebSocket Server Error',
       `Failed to start WebSocket server: ${error}`
     );
+  }
+
+  // Start Python backend (dev and prod). Allow opt-out with S2A_DISABLE_BACKEND=1
+  const disableBackend = process.env.S2A_DISABLE_BACKEND === '1';
+  const shouldStartBackend = !!backendManager && !disableBackend;
+  mainLogger.info('Backend startup decision', {
+    isPackaged: app.isPackaged,
+    NODE_ENV: process.env.NODE_ENV,
+    disableBackend,
+    shouldStartBackend
+  });
+  
+  if (shouldStartBackend) {
+    try {
+      mainLogger.info('Starting Python backend...');
+      const backendStarted = await backendManager!.startBackend();
+      if (!backendStarted) {
+        mainLogger.error('Failed to start Python backend');
+        await backendManager!.showBackendErrorDialog();
+      } else {
+        mainLogger.info('Python backend started successfully');
+      }
+    } catch (error) {
+      mainLogger.error('Error starting Python backend:', error);
+      await backendManager!.showBackendErrorDialog();
+    }
+  } else {
+    mainLogger.info('Skipping backend startup', {
+      reason: disableBackend ? 'S2A_DISABLE_BACKEND=1' : 'No backend manager'
+    });
   }
   
   app.on('activate', () => {
@@ -255,10 +430,19 @@ app.on('window-all-closed', async () => {
 
 // Clean up on app quit
 app.on('before-quit', async (event) => {
-  if (wsServer) {
+  if (wsServer || backendManager) {
     event.preventDefault();
-    await wsServer.stop();
-    wsServer = null;
+    
+    if (wsServer) {
+      await wsServer.stop();
+      wsServer = null;
+    }
+    
+    if (backendManager) {
+      await backendManager.stopBackend();
+      backendManager = null;
+    }
+    
     app.quit();
   }
 });
@@ -279,6 +463,24 @@ ipcMain.handle('close-floating-window', async () => {
     floatingWindow.close();
   }
   return true;
+});
+
+ipcMain.handle('resize-floating-window', async (_, width: number, height: number) => {
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    // Get current window bounds to preserve position
+    const bounds = floatingWindow.getBounds();
+    
+    // Animate the resize for smooth transition
+    floatingWindow.setBounds({
+      x: bounds.x,
+      y: bounds.y,
+      width: width,
+      height: height
+    }, true); // true enables animation on macOS
+    
+    return true;
+  }
+  return false;
 });
 
 ipcMain.handle('expand-to-main-window', async (event, sessionId?: string, notes?: string) => {
@@ -306,19 +508,68 @@ ipcMain.handle('expand-to-main-window', async (event, sessionId?: string, notes?
 
 // IPC Handlers
 ipcMain.handle('get-sources', async () => {
-  const sources = await desktopCapturer.getSources({
-    types: ['window', 'screen'],
-  });
-  return sources;
+  try {
+    mainLogger.info('Getting desktop sources...');
+    const sources = await desktopCapturer.getSources({
+      types: ['window', 'screen'],
+    });
+    mainLogger.info(`Found ${sources.length} sources`);
+    
+    // If no sources found, it might be a permissions issue
+    if (sources.length === 0) {
+      mainLogger.warn('No sources found - check screen recording permissions');
+      // On macOS, prompt for screen recording permission
+      if (process.platform === 'darwin') {
+        const { systemPreferences } = require('electron');
+        const screenAccess = systemPreferences.getMediaAccessStatus('screen');
+        mainLogger.info('Screen recording permission status:', screenAccess);
+        
+        if (screenAccess !== 'granted') {
+          dialog.showErrorBox(
+            'Screen Recording Permission Required',
+            'Screen2Action needs screen recording permission to capture your screen.\n\n' +
+            'Please grant permission in System Settings > Privacy & Security > Screen Recording, ' +
+            'then restart the application.'
+          );
+        }
+      }
+    }
+    
+    return sources;
+  } catch (error) {
+    mainLogger.error('Failed to get desktop sources:', error);
+    
+    // Show user-friendly error message
+    if (process.platform === 'darwin') {
+      dialog.showErrorBox(
+        'Screen Recording Permission Required',
+        'Screen2Action needs screen recording permission to capture your screen.\n\n' +
+        'Please grant permission in:\n' +
+        'System Settings > Privacy & Security > Screen Recording\n\n' +
+        'Then restart Screen2Action.'
+      );
+    }
+    
+    throw new Error('Failed to get sources. Please check screen recording permissions.');
+  }
 });
 
 ipcMain.handle('start-recording', async (_, screenId: string) => {
   if (recordingManager) {
     const sessionId = await recordingManager.startRecording(screenId);
+
+    // Switch main logger and backend-manager logger to session folder
+    try {
+      mainLogger.useSession(sessionId);
+    } catch {}
+    try {
+      backendManager?.setSession(sessionId);
+    } catch {}
     
     // Also start audio recording in Python backend
     if (wsServer) {
       try {
+        mainLogger.info('Sending start_recording to backend', { sessionId, screenId });
         await wsServer.sendMessage({
           type: 'command',
           action: 'start_recording',
@@ -327,12 +578,14 @@ ipcMain.handle('start-recording', async (_, screenId: string) => {
             screenId
           }
         });
-        console.log('Started audio recording in backend for session:', sessionId);
+        mainLogger.info('Started audio recording in backend for session:', sessionId);
       } catch (error: any) {
-        console.warn('Python backend not connected for audio recording:', error.message);
+        mainLogger.warn('Python backend not connected for audio recording:', error.message);
         // Continue without audio if backend is not connected
         // The recording will still work, just without audio
       }
+    } else {
+      mainLogger.warn('WebSocket server not available for audio recording');
     }
     
     return sessionId;
@@ -346,15 +599,18 @@ ipcMain.handle('stop-recording', async () => {
     // Stop audio recording in Python backend
     if (wsServer) {
       try {
+        mainLogger.info('Sending stop_recording to backend');
         await wsServer.sendMessage({
           type: 'command',
           action: 'stop_recording',
           payload: {}
         });
-        console.log('Stopped audio recording in backend');
+        mainLogger.info('Stopped audio recording in backend');
       } catch (error: any) {
-        console.warn('Python backend not connected for stopping audio:', error.message);
+        mainLogger.warn('Python backend not connected for stopping audio:', error.message);
       }
+    } else {
+      mainLogger.warn('WebSocket server not available for stopping audio recording');
     }
     const result = await recordingManager.stopRecording();
     return result; // { duration, sessionId }
@@ -369,9 +625,52 @@ ipcMain.handle('capture-screenshot', async (_, options: any) => {
   throw new Error('Screenshot manager not initialized');
 });
 
+ipcMain.handle('copy-screenshot', async (_, idOrPath: string) => {
+  if (screenshotManager) {
+    const { nativeImage, clipboard } = require('electron');
+    // If it's a file path, copy directly from the path
+    if (idOrPath.includes('/') || idOrPath.includes('\\')) {
+      const image = nativeImage.createFromPath(idOrPath);
+      clipboard.writeImage(image);
+    } else {
+      // Otherwise, treat it as an ID
+      await screenshotManager.copyToClipboard(idOrPath);
+    }
+  } else {
+    throw new Error('Screenshot manager not initialized');
+  }
+});
+
+ipcMain.handle('save-screenshot', async (_, id: string, relativePath: string) => {
+  if (screenshotManager) {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Get the full path to user_screenshots directory
+    const userScreenshotsDir = path.join(app.getPath('documents'), 'Screen2Action', 'user_screenshots');
+    const fullPath = path.join(userScreenshotsDir, path.basename(relativePath));
+    
+    // Return the full path
+    return fullPath;
+  }
+  throw new Error('Screenshot manager not initialized');
+});
+
 ipcMain.handle('send-to-ai', async (_, data: any) => {
-  console.log('Received AI command:', data);
-  if (wsServer) {
+  mainLogger.info('Received AI command:', data);
+  if (!wsServer) {
+    mainLogger.error('WebSocket server not initialized when handling send-to-ai');
+    throw new Error('WebSocket server not initialized. Please restart the application.');
+  }
+  
+  try {
+    // Wait for backend connection to avoid race
+    const ok = await wsServer.waitForBackendConnected(15000);
+    if (!ok) {
+      mainLogger.error('Backend connection timeout after 15 seconds');
+      throw new Error('No connected Python backend. Please check if the backend is running.');
+    }
+    
     // If data has an action field, use it directly, otherwise default to process_command
     const message = data.action ? {
       type: 'request',
@@ -382,34 +681,63 @@ ipcMain.handle('send-to-ai', async (_, data: any) => {
       action: 'process_command',
       payload: data,
     };
-    console.log('Sending to backend:', message);
+    
+    mainLogger.info('Sending to backend:', message);
     const result = await wsServer.sendMessage(message);
-    console.log('Backend response:', result);
+    mainLogger.info('Backend response:', result);
     return result;
+  } catch (error) {
+    mainLogger.error('Error in send-to-ai handler:', error);
+    throw error;
   }
-  throw new Error('WebSocket server not initialized');
 });
 
 ipcMain.handle('enhance-note', async (_, data: any) => {
-  if (wsServer) {
+  if (!wsServer) {
+    mainLogger.error('WebSocket server not initialized when handling enhance-note');
+    throw new Error('WebSocket server not initialized. Please restart the application.');
+  }
+  
+  try {
+    const ok = await wsServer.waitForBackendConnected(15000);
+    if (!ok) {
+      mainLogger.error('Backend connection timeout for enhance-note');
+      throw new Error('No connected Python backend. Please check if the backend is running.');
+    }
+    
     return await wsServer.sendMessage({
       type: 'request',
       action: 'enhance_note',
       payload: data,
     });
+  } catch (error) {
+    mainLogger.error('Error in enhance-note handler:', error);
+    throw error;
   }
-  throw new Error('WebSocket server not initialized');
 });
 
 ipcMain.handle('process-mcp', async (_, data: any) => {
-  if (wsServer) {
+  if (!wsServer) {
+    mainLogger.error('WebSocket server not initialized when handling process-mcp');
+    throw new Error('WebSocket server not initialized. Please restart the application.');
+  }
+  
+  try {
+    const ok = await wsServer.waitForBackendConnected(15000);
+    if (!ok) {
+      mainLogger.error('Backend connection timeout for process-mcp');
+      throw new Error('No connected Python backend. Please check if the backend is running.');
+    }
+    
     return await wsServer.sendMessage({
       type: 'request',
       action: 'process_mcp',
       payload: data,
     });
+  } catch (error) {
+    mainLogger.error('Error in process-mcp handler:', error);
+    throw error;
   }
-  throw new Error('WebSocket server not initialized');
 });
 
 // Audio handlers
@@ -852,4 +1180,25 @@ ipcMain.handle('get-screenshot-path', async (_, sessionId: string, timestamp: nu
 // Expose settings to renderer
 ipcMain.handle('get-recordings-dir', async () => {
   return getRecordingsDir();
+});
+
+// Configuration IPC handlers
+ipcMain.handle('get-app-config', async () => {
+  return configManager?.getAppConfig();
+});
+
+ipcMain.handle('get-config-values', async () => {
+  return configManager?.getConfigValues();
+});
+
+ipcMain.handle('save-config-values', async (_, values: Record<string, string>) => {
+  return configManager?.saveConfigValues(values);
+});
+
+ipcMain.handle('select-directory', async () => {
+  return configManager?.selectDirectory();
+});
+
+ipcMain.handle('get-app-info', async () => {
+  return configManager?.getAppInfo();
 });

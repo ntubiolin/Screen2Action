@@ -3,9 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getRecordingsDir } from './config';
+import { Logger, createSessionLogger } from './logger';
 
 export class RecordingManager {
   private floatingWindow: BrowserWindow | null = null;
+  private sessionLogger: Logger | null = null;
 
   setFloatingWindow(window: BrowserWindow | null) {
     this.floatingWindow = window;
@@ -49,6 +51,15 @@ export class RecordingManager {
     fs.mkdirSync(this.sessionPath, { recursive: true });
     fs.mkdirSync(path.join(this.sessionPath, 'screenshots'), { recursive: true });
     fs.mkdirSync(path.join(this.sessionPath, 'audio'), { recursive: true });
+
+    // Initialize session logger under logs/sessions/{sessionId}
+    this.sessionLogger = createSessionLogger('session', this.sessionId);
+    this.sessionLogger.info('Session started', {
+      sessionId: this.sessionId,
+      screenId,
+      recordingsDir,
+      sessionPath: this.sessionPath
+    });
     
     // Initialize metadata
     const metadata = {
@@ -62,6 +73,7 @@ export class RecordingManager {
       path.join(this.sessionPath, 'metadata.json'),
       JSON.stringify(metadata, null, 2)
     );
+    this.sessionLogger.info('Metadata initialized', { metadataPath: path.join(this.sessionPath, 'metadata.json') });
     
     // Start periodic screenshots
     this.startScreenshotCapture();
@@ -97,12 +109,13 @@ export class RecordingManager {
           'screenshots',
           `${prefix}_${finalTimestamp}_thumb.jpg`
         );
-        try { fs.writeFileSync(fullPath, screenshot.toPNG()); } catch {}
-        try { fs.writeFileSync(thumbPath, screenshot.resize({ width: 320, height: 180 }).toJPEG(80)); } catch {}
+        try { fs.writeFileSync(fullPath, screenshot.toPNG()); this.sessionLogger?.info('Final full screenshot saved', { fullPath }); } catch (e) { this.sessionLogger?.warn('Failed to save final full screenshot', { error: String(e) }); }
+        try { fs.writeFileSync(thumbPath, screenshot.resize({ width: 320, height: 180 }).toJPEG(80)); this.sessionLogger?.info('Final thumb screenshot saved', { thumbPath }); } catch (e) { this.sessionLogger?.warn('Failed to save final thumb screenshot', { error: String(e) }); }
       }
       // No need to restore/show floating window
     } catch (e) {
       console.warn('Final screenshot capture failed:', e);
+      this.sessionLogger?.warn('Final screenshot capture failed', { error: String(e) });
     }
 
     this.isRecording = false;
@@ -118,6 +131,7 @@ export class RecordingManager {
     metadata.endTime = new Date().toISOString();
     metadata.duration = Date.now() - this.startTime;
     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+    this.sessionLogger?.info('Session stopped', { metadataPath, duration: metadata.duration });
 
     const duration = metadata.duration;
     const sessionId = this.sessionId;
@@ -157,6 +171,7 @@ export class RecordingManager {
           );
           
           fs.writeFileSync(fullPath, screenshot.toPNG());
+          this.sessionLogger?.debug('Screenshot saved', { fullPath, timestamp });
           
           // Save thumbnail with datetime prefix
           const thumb = screenshot.resize({ width: 320, height: 180 });
@@ -167,11 +182,13 @@ export class RecordingManager {
           );
           
           fs.writeFileSync(thumbPath, thumb.toJPEG(80));
+          this.sessionLogger?.debug('Thumbnail saved', { thumbPath, timestamp });
         }
         
         // No need to show floating window
       } catch (error) {
         console.error('Screenshot capture error:', error);
+        this.sessionLogger?.error('Screenshot capture error', { error: String(error) });
       }
     }, 10000); // 10 seconds
   }
