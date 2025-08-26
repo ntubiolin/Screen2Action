@@ -7,6 +7,7 @@ interface FloatingAIWindowProps {
   onToggle: () => void;
   screenshotPath?: string | null;
   command?: string;
+  autoSend?: boolean;
   onInsertScreenshot: (path: string) => void;
   onCopyScreenshot: (path: string) => void;
   onCollapseChange?: (collapsed: boolean) => void;
@@ -25,6 +26,7 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
   onToggle,
   screenshotPath,
   command,
+  autoSend,
   onInsertScreenshot,
   onCopyScreenshot,
   onCollapseChange
@@ -47,24 +49,29 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const imageManipulatorRef = useRef<ImageManipulator | null>(null);
 
-  // Initialize chat with screenshot and command when provided
+  // Initialize chat with screenshot and optionally auto-send when flagged by parent
   useEffect(() => {
     console.log('AI Window effect triggered:', { screenshotPath, command, isVisible });
     if (isVisible && screenshotPath) {
-      // Add user message with screenshot and command
-      const userMessage: ChatMessage = {
-        role: 'user',
-        content: command || 'Screenshot captured',
+      // Show a system message to indicate screenshot is ready, avoid implying the user has sent anything yet
+      const sysMessage: ChatMessage = {
+        role: 'system',
+        content: 'Screenshot captured',
         screenshot: screenshotPath
       };
-      setChatHistory([userMessage]);
-      
-      // Process the command with LLM if there's a command
+      setChatHistory([sysMessage]);
+
+      // Prefill the input with extracted command so user can edit and explicitly send
       if (command) {
-        processWithLLM(command, screenshotPath);
+        setInputMessage(command);
+        // Auto send only when instructed (Enter-triggered open)
+        if (autoSend) {
+          // Fire and forget; use current screenshotPath
+          processWithLLM(command, screenshotPath);
+        }
       }
     }
-  }, [screenshotPath, command, isVisible]);
+  }, [screenshotPath, command, isVisible, autoSend]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -81,24 +88,44 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
       // Send to LLM for processing
       const result = await window.electronAPI.ai.sendCommand({
         action: 'analyze_screenshot',
-        command: userCommand,
-        screenshot: imagePath,
-        supportGrounding: true
+        payload: {
+          command: userCommand,
+          screenshot: imagePath,
+          supportGrounding: true
+        }
       });
 
       if (result.success) {
+        // Normalize annotation types if backend returns short keys
+        let normalizedAnnotations = Array.isArray(result.annotations)
+          ? result.annotations.map((ann: any) => {
+              if (!ann || typeof ann !== 'object') return ann;
+              if (ann.type === 'bbox') {
+                return { ...ann, type: 'boundingBox' };
+              }
+              return ann;
+            })
+          : [];
+
+        // Fallback: parse annotations from free-form response if backend returned none
+        if (!normalizedAnnotations || normalizedAnnotations.length === 0) {
+          const parsedFromText = parseLLMAnnotations(result.response || '');
+          if (parsedFromText.length > 0) {
+            normalizedAnnotations = parsedFromText;
+          }
+        }
         // Add assistant response
         const assistantMessage: ChatMessage = {
           role: 'assistant',
           content: result.response,
-          annotations: result.annotations
+          annotations: normalizedAnnotations
         };
         setChatHistory(prev => [...prev, assistantMessage]);
 
         // Process annotations if any
-        if (result.annotations && result.annotations.length > 0) {
-          setCurrentAnnotations(result.annotations);
-          await applyAnnotations(imagePath, result.annotations);
+        if (normalizedAnnotations && normalizedAnnotations.length > 0) {
+          setCurrentAnnotations(normalizedAnnotations);
+          await applyAnnotations(imagePath, normalizedAnnotations);
         }
       } else {
         // Add error message

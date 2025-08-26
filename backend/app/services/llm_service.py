@@ -191,31 +191,68 @@ class LLMService:
                 import re
                 import json
                 
-                # Look for JSON-like structures in the response
-                json_pattern = r'\{[^}]*"type"\s*:\s*"(bbox|crop|arrow)"[^}]*\}'
-                matches = re.findall(json_pattern, response_text)
-                
-                for match in matches:
+                # 1) Prefer code-fenced JSON blocks
+                code_block_pattern = r"```(?:json)?\s*({[\s\S]*?})\s*```"
+                for m in re.finditer(code_block_pattern, response_text, flags=re.IGNORECASE):
                     try:
-                        # Find the full JSON object
-                        start = response_text.find(match) - 1
-                        depth = 0
-                        end = start
-                        for i, char in enumerate(response_text[start:]):
-                            if char == '{':
-                                depth += 1
-                            elif char == '}':
-                                depth -= 1
-                                if depth == 0:
-                                    end = start + i + 1
-                                    break
-                        
-                        if end > start:
-                            json_str = response_text[start:end]
-                            annotation = json.loads(json_str)
-                            annotations.append(annotation)
-                    except:
+                        candidate = m.group(1)
+                        parsed = json.loads(candidate)
+                        if isinstance(parsed, dict) and parsed.get("type") in ("bbox", "crop", "arrow"):
+                            annotations.append(parsed)
+                        elif isinstance(parsed, list):
+                            for item in parsed:
+                                if isinstance(item, dict) and item.get("type") in ("bbox", "crop", "arrow"):
+                                    annotations.append(item)
+                    except Exception:
+                        # Ignore malformed JSON blocks and continue
                         pass
+
+                # 2) Fallback: search for inline JSON objects containing type
+                if not annotations:
+                    inline_pattern = r"\{[\s\S]*?\"type\"\s*:\s*\"(bbox|crop|arrow)\"[\s\S]*?\}"
+                    for m in re.finditer(inline_pattern, response_text, flags=re.IGNORECASE):
+                        try:
+                            obj_str = m.group(0)
+                            parsed = json.loads(obj_str)
+                            if isinstance(parsed, dict):
+                                annotations.append(parsed)
+                        except Exception:
+                            # Ignore and continue scanning
+                            pass
+
+                # 3) Normalize extracted annotations
+                normalized_annotations = []
+                for ann in annotations:
+                    if not isinstance(ann, dict):
+                        continue
+                    try:
+                        ann_type = ann.get("type")
+                        if ann_type == "bbox":
+                            coords = ann.get("coordinates") or ann.get("coords") or ann.get("box")
+                            if isinstance(coords, list) and len(coords) >= 4:
+                                x, y, w, h = [int(float(c)) for c in coords[:4]]
+                                normalized = {"type": "bbox", "coordinates": [x, y, w, h]}
+                                if "label" in ann:
+                                    normalized["label"] = str(ann["label"])
+                                normalized_annotations.append(normalized)
+                        elif ann_type == "crop":
+                            coords = ann.get("coordinates") or ann.get("region")
+                            if isinstance(coords, list) and len(coords) >= 4:
+                                x, y, w, h = [int(float(c)) for c in coords[:4]]
+                                normalized_annotations.append({"type": "crop", "coordinates": [x, y, w, h]})
+                        elif ann_type == "arrow":
+                            coords = ann.get("coordinates") or ann.get("point")
+                            if isinstance(coords, list) and len(coords) >= 2:
+                                x, y = [int(float(c)) for c in coords[:2]]
+                                out = {"type": "arrow", "coordinates": [x, y]}
+                                if ann.get("label"):
+                                    out["label"] = str(ann["label"]) 
+                                normalized_annotations.append(out)
+                    except Exception:
+                        # Skip any annotation we fail to normalize
+                        pass
+
+                annotations = normalized_annotations
             
             return {
                 "success": True,
