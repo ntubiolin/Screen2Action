@@ -415,7 +415,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   
   // Handle screenshot capture
   const handleScreenshotCapture = async () => {
-    if (isCapturingScreenshot) return;
+    if (isCapturingScreenshot || triggerLineNumber === null) return;
     
     setIsCapturingScreenshot(true);
     try {
@@ -444,7 +444,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       setAIScreenshotPath(screenshotPath);
       
       // If there's a command, show AI window
-      if (aiCommand) {
+      if (aiCommand && aiCommand.length > 0) {
         setShowAIWindow(true);
       } else {
         // No command, directly insert screenshot into markdown
@@ -452,6 +452,9 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       }
     } catch (error) {
       console.error('Failed to capture screenshot:', error);
+      // Reset trigger state on error
+      setTriggerLineNumber(null);
+      setAICommand('');
     } finally {
       setIsCapturingScreenshot(false);
     }
@@ -486,10 +489,14 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     setAICommand('');
   };
   
-  // Handle Enter key press
-  const handleEnterKey = () => {
-    const editor = editorRef.current;
-    if (!editor) return;
+  // Handle potential AI trigger on content change
+  const checkForAITriggerOnEnter = (editor: any, changes: any) => {
+    // Check if Enter key was pressed
+    const hasEnter = changes.some((change: any) => 
+      change.text.includes('\n')
+    );
+    
+    if (!hasEnter) return;
     
     const position = editor.getPosition();
     if (!position) return;
@@ -497,19 +504,22 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     const model = editor.getModel();
     if (!model) return;
     
-    const lineContent = model.getLineContent(position.lineNumber);
-    const match = lineContent.match(aiTriggerRegex);
+    // Check the previous line (before the new line)
+    const previousLineNumber = position.lineNumber - 1;
+    if (previousLineNumber < 1) return;
+    
+    const previousLineContent = model.getLineContent(previousLineNumber);
+    const match = previousLineContent.match(aiTriggerRegex);
     
     if (match) {
-      // Trigger screenshot capture
-      handleScreenshotCapture();
-      // Return false to prevent the default Enter behavior
-      return false;
+      // We found a trigger on the previous line
+      // Schedule screenshot capture after a brief delay to let the editor update
+      setTimeout(() => {
+        setTriggerLineNumber(previousLineNumber);
+        setAICommand(match[1].trim());
+        handleScreenshotCapture();
+      }, 10);
     }
-    
-    // Don't interfere with normal Enter key behavior
-    // Return undefined to let Monaco handle it normally
-    return undefined;
   };
   
   // Copy screenshot to clipboard
@@ -530,16 +540,17 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     // Initialize prev keys so only new headings get timestamps while recording
     try { updateHeadingTimestamps(notes || ''); } catch {}
     
-    editor.onDidChangeModelContent(() => {
+    editor.onDidChangeModelContent((e: any) => {
       const content = editor.getValue();
       updateHeadingTimestamps(content);
       detectAITrigger(content);
+      
+      // Check for AI trigger when Enter is pressed
+      checkForAITriggerOnEnter(editor, e.changes);
     });
     
-    // Add Enter key handler for AI trigger
-    // The third parameter is the context - it means this handler only runs when cursor is after '!'
-    // But we need to check for '!!!' pattern, so let's use a more precise approach
-    editor.addCommand(monaco.KeyCode.Enter, handleEnterKey);
+    // Don't override the Enter key - let Monaco handle it normally
+    // We'll detect the trigger through content changes instead
     
     // Add keyboard shortcut for Ctrl/Cmd+M
     editor.addAction({
