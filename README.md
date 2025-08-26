@@ -269,14 +269,31 @@ uv run pytest -v
 uv run pytest -m "not slow"
 ```
 
-#### End-to-End Tests
+#### End-to-End Tests (Playwright)
 ```bash
-# Run E2E tests (requires both frontend and backend running)
+# Run E2E tests for Electron app (builds app and starts backend automatically)
 npm run test:e2e
 
-# Run E2E tests in headless mode
-npm run test:e2e:headless
+# Run E2E tests with UI (interactive mode)
+npm run test:e2e:ui
+
+# Run E2E tests in headed mode (see browser)
+npm run test:e2e:headed
+
+# Debug E2E tests
+npm run test:e2e:debug
 ```
+
+The E2E tests will:
+- Automatically build the Electron app
+- Start the Python backend server if not running
+- Launch the Electron application
+- Test complete workflows including:
+  - Recording with voice narration
+  - Adding notes with H1 paragraphs
+  - Stopping recording and navigating to review
+  - Playing audio in the review page
+  - Verifying timestamps and note synchronization
 
 #### Integration Tests
 ```bash
