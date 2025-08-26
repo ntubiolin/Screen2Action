@@ -57,15 +57,53 @@ def setup_logging():
     logger = logging.getLogger(__name__)
     logger.info("Backend launcher starting...")
     logger.info(f"Python version: {sys.version}")
+    logger.info(f"Python executable: {sys.executable}")
     logger.info(f"Log file: {log_file}")
     logger.info(f"Working directory: {Path.cwd()}")
     
     return logger
 
 
+def check_and_activate_venv():
+    """Check if we're in a virtual environment, if not try to activate it"""
+    logger = logging.getLogger(__name__)
+    
+    # Check if we're already in a virtual environment
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        logger.info("Already running in a virtual environment")
+        return True
+    
+    # Try to find and use the virtual environment
+    backend_dir = Path(__file__).parent
+    venv_paths = [
+        backend_dir / '.venv',
+        backend_dir / 'venv'
+    ]
+    
+    for venv_path in venv_paths:
+        if venv_path.exists():
+            # Add the virtual environment's site-packages to sys.path
+            if sys.platform == 'win32':
+                site_packages = venv_path / 'Lib' / 'site-packages'
+            else:
+                python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+                site_packages = venv_path / 'lib' / python_version / 'site-packages'
+            
+            if site_packages.exists():
+                sys.path.insert(0, str(site_packages))
+                logger.info(f"Added virtual environment to path: {site_packages}")
+                return True
+    
+    logger.warning("No virtual environment found, using system Python")
+    return False
+
+
 if __name__ == "__main__":
     # Set up logging first so we always capture errors
     logger = setup_logging()
+    
+    # Try to activate virtual environment
+    check_and_activate_venv()
 
     try:
         import uvicorn  # type: ignore
