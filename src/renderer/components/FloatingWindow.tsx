@@ -372,6 +372,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     
     const lines = text.split('\n');
     const newDecorationIds: string[] = [];
+    let foundTrigger = false;
     
     lines.forEach((line, index) => {
       const match = line.match(aiTriggerRegex);
@@ -391,12 +392,19 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         newDecorationIds.push(decorationId);
         
         // Store the trigger line and command
-        if (!isCapturingScreenshot) {
+        if (!isCapturingScreenshot && !foundTrigger) {
           setTriggerLineNumber(lineNumber);
           setAICommand(command);
+          foundTrigger = true;
         }
       }
     });
+    
+    // Clear trigger state if no trigger found
+    if (!foundTrigger && !isCapturingScreenshot) {
+      setTriggerLineNumber(null);
+      setAICommand('');
+    }
     
     // Clear old decorations and apply new ones
     if (decorationIdsRef.current.length > 0) {
@@ -479,7 +487,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   };
   
   // Handle Enter key press
-  const handleEnterKey = (e: any) => {
+  const handleEnterKey = () => {
     const editor = editorRef.current;
     if (!editor) return;
     
@@ -493,16 +501,15 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     const match = lineContent.match(aiTriggerRegex);
     
     if (match) {
-      // Prevent default Enter behavior
-      e.preventDefault();
-      e.stopPropagation();
-      
       // Trigger screenshot capture
       handleScreenshotCapture();
+      // Return false to prevent the default Enter behavior
       return false;
     }
     
-    return true;
+    // Don't interfere with normal Enter key behavior
+    // Return undefined to let Monaco handle it normally
+    return undefined;
   };
   
   // Copy screenshot to clipboard
@@ -530,7 +537,9 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     });
     
     // Add Enter key handler for AI trigger
-    editor.addCommand(monaco.KeyCode.Enter, handleEnterKey, '!');
+    // The third parameter is the context - it means this handler only runs when cursor is after '!'
+    // But we need to check for '!!!' pattern, so let's use a more precise approach
+    editor.addCommand(monaco.KeyCode.Enter, handleEnterKey);
     
     // Add keyboard shortcut for Ctrl/Cmd+M
     editor.addAction({
