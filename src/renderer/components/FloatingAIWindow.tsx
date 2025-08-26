@@ -27,6 +27,7 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
   onInsertScreenshot,
   onCopyScreenshot
 }) => {
+  console.log('FloatingAIWindow render:', { isVisible, screenshotPath, command });
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -41,19 +42,22 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
 
   // Initialize chat with screenshot and command when provided
   useEffect(() => {
-    if (screenshotPath && command) {
+    console.log('AI Window effect triggered:', { screenshotPath, command, isVisible });
+    if (isVisible && screenshotPath) {
       // Add user message with screenshot and command
       const userMessage: ChatMessage = {
         role: 'user',
-        content: command,
+        content: command || 'Screenshot captured',
         screenshot: screenshotPath
       };
       setChatHistory([userMessage]);
       
-      // Process the command with LLM
-      processWithLLM(command, screenshotPath);
+      // Process the command with LLM if there's a command
+      if (command) {
+        processWithLLM(command, screenshotPath);
+      }
     }
-  }, [screenshotPath, command]);
+  }, [screenshotPath, command, isVisible]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -165,7 +169,8 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
     setPreviewScreenshot(processedScreenshot || screenshotPath || null);
   };
 
-  if (!isVisible) return null;
+  // Always render but control visibility with display style
+  // This ensures the component is properly initialized
 
   return (
     <>
@@ -181,7 +186,7 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
           backdropFilter: 'blur(10px)',
           border: '1px solid rgba(75, 85, 99, 0.5)',
           borderRadius: '8px',
-          display: 'flex',
+          display: isVisible ? 'flex' : 'none',
           flexDirection: 'column',
           transition: 'bottom 0.3s ease-in-out',
           zIndex: 100

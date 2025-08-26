@@ -415,7 +415,12 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   
   // Handle screenshot capture
   const handleScreenshotCapture = async () => {
-    if (isCapturingScreenshot || triggerLineNumber === null) return;
+    console.log('handleScreenshotCapture called:', { triggerLineNumber, aiCommand, isCapturingScreenshot });
+    
+    if (isCapturingScreenshot || triggerLineNumber === null) {
+      console.log('Skipping capture:', { isCapturingScreenshot, triggerLineNumber });
+      return;
+    }
     
     setIsCapturingScreenshot(true);
     try {
@@ -427,6 +432,8 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         now.getHours().toString().padStart(2, '0')}_${
         now.getMinutes().toString().padStart(2, '0')}_${
         now.getSeconds().toString().padStart(2, '0')}`;
+      
+      console.log('Capturing screenshot with timestamp:', timestamp);
       
       // Capture screenshot
       const screenshotId = await window.electronAPI.screenshot.capture({ 
@@ -441,12 +448,16 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
         `user_screenshots/user_screenshot_${timestamp}.png`
       );
       
+      console.log('Screenshot saved:', screenshotPath);
       setAIScreenshotPath(screenshotPath);
       
-      // If there's a command, show AI window
+      // Check if there's a command (anything after !!!)
+      // Show AI window if there's any text, even just for viewing the screenshot
       if (aiCommand && aiCommand.length > 0) {
+        console.log('Showing AI window with command:', aiCommand);
         setShowAIWindow(true);
       } else {
+        console.log('No command, inserting screenshot directly');
         // No command, directly insert screenshot into markdown
         insertScreenshotIntoMarkdown(screenshotPath);
       }
@@ -513,12 +524,17 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     
     if (match) {
       // We found a trigger on the previous line
-      // Schedule screenshot capture after a brief delay to let the editor update
+      const command = match[1] ? match[1].trim() : '';
+      console.log('AI trigger detected:', { line: previousLineNumber, command });
+      
+      // Set the trigger state and capture screenshot
+      setTriggerLineNumber(previousLineNumber);
+      setAICommand(command);
+      
+      // Schedule screenshot capture after a brief delay to ensure state is set
       setTimeout(() => {
-        setTriggerLineNumber(previousLineNumber);
-        setAICommand(match[1].trim());
         handleScreenshotCapture();
-      }, 10);
+      }, 50);
     }
   };
   
