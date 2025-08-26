@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFloatingWindow: () => ipcRenderer.invoke('open-floating-window'),
     closeFloatingWindow: () => ipcRenderer.invoke('close-floating-window'),
     expandToMainWindow: (sessionId?: string, notes?: string) => ipcRenderer.invoke('expand-to-main-window', sessionId, notes),
+    resizeFloatingWindow: (width: number, height: number) => ipcRenderer.invoke('resize-floating-window', width, height),
   },
   
   settings: {

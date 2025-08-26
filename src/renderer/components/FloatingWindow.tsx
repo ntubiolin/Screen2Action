@@ -27,6 +27,10 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   
   // AI Window state
   const [showAIWindow, setShowAIWindow] = useState(false);
+  const [isAIWindowCollapsed, setIsAIWindowCollapsed] = useState(false);
+  const baseWindowHeight = 300;
+  const aiWindowExpandedHeight = 300;
+  const aiWindowCollapsedHeight = 40; // Just the header height
   const [aiScreenshotPath, setAIScreenshotPath] = useState<string | null>(null);
   const [aiCommand, setAICommand] = useState<string>('');
   const [triggerLineNumber, setTriggerLineNumber] = useState<number | null>(null);
@@ -53,6 +57,23 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   useEffect(() => {
     loadSources();
   }, []);
+  
+  // Resize window when AI window is toggled or collapsed
+  useEffect(() => {
+    const resizeWindow = async () => {
+      try {
+        let newHeight = baseWindowHeight;
+        if (showAIWindow) {
+          newHeight = baseWindowHeight + (isAIWindowCollapsed ? aiWindowCollapsedHeight : aiWindowExpandedHeight);
+        }
+        await window.electronAPI.window.resizeFloatingWindow(400, newHeight);
+      } catch (error) {
+        console.error('Failed to resize floating window:', error);
+      }
+    };
+    
+    resizeWindow();
+  }, [showAIWindow, isAIWindowCollapsed]);
 
   // Timer for recording duration and screenshot count update
   useEffect(() => {
@@ -471,6 +492,12 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     }
   };
   
+  // Handle AI window collapse state change
+  const handleAIWindowCollapseChange = (collapsed: boolean) => {
+    console.log('AI window collapse state changed:', collapsed);
+    setIsAIWindowCollapsed(collapsed);
+  };
+  
   // Handle screenshot capture (for backward compatibility if needed)
   const handleScreenshotCapture = async () => {
     console.log('handleScreenshotCapture called:', { triggerLineNumber, aiCommand, isCapturingScreenshot });
@@ -642,7 +669,14 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   };
 
   return (
-    <>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      width: '100%',
+      height: '100%',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
       {/* Inject styles for timestamp chips and AI trigger */}
       <style>{`
         .s2a-ts-chip { 
@@ -691,14 +725,15 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       
       <div className="floating-window" style={{
       width: '100%',
-      height: '100%',
+      height: showAIWindow ? `${baseWindowHeight}px` : '100%',
       backgroundColor: '#1f2937',
-      borderRadius: '8px',
+      borderRadius: showAIWindow ? '8px 8px 0 0' : '8px',
       boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
       display: 'flex',
       flexDirection: 'column',
       position: 'relative',
       border: '1px solid rgba(75, 85, 99, 0.5)',
+      borderBottom: showAIWindow ? 'none' : '1px solid rgba(75, 85, 99, 0.5)',
       overflow: 'hidden'
     }}>
       {/* Top Toolbar - Make it draggable */}
@@ -980,6 +1015,28 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
           }}></span>
           Normal
         </span>
+        
+        {/* AI Window Toggle */}
+        {aiScreenshotPath && (
+          <button
+            onClick={() => setShowAIWindow(!showAIWindow)}
+            style={{
+              backgroundColor: showAIWindow ? '#6366f1' : 'transparent',
+              color: showAIWindow ? 'white' : '#9ca3af',
+              border: '1px solid rgba(99, 102, 241, 0.5)',
+              borderRadius: '4px',
+              padding: '2px 6px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+            title={showAIWindow ? 'Hide AI Assistant' : 'Show AI Assistant'}
+          >
+            🤖 AI
+          </button>
+        )}
 
         {/* Expand button when recording is stopped */}
         {isReadOnly && (
@@ -1001,15 +1058,24 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       </div>
     </div>
     
-    {/* Floating AI Window */}
-    <FloatingAIWindow
-      isVisible={showAIWindow}
-      onToggle={() => setShowAIWindow(!showAIWindow)}
-      screenshotPath={aiScreenshotPath}
-      command={aiCommand}
-      onInsertScreenshot={insertScreenshotIntoMarkdown}
-      onCopyScreenshot={handleCopyScreenshot}
-    />
-    </>
+    {/* Floating AI Window - Now properly sized */}
+    {showAIWindow && (
+      <div style={{
+        width: '100%',
+        height: `${isAIWindowCollapsed ? aiWindowCollapsedHeight : aiWindowExpandedHeight}px`,
+        position: 'relative'
+      }}>
+        <FloatingAIWindow
+          isVisible={showAIWindow}
+          onToggle={() => setShowAIWindow(!showAIWindow)}
+          screenshotPath={aiScreenshotPath}
+          command={aiCommand}
+          onInsertScreenshot={insertScreenshotIntoMarkdown}
+          onCopyScreenshot={handleCopyScreenshot}
+          onCollapseChange={handleAIWindowCollapseChange}
+        />
+      </div>
+    )}
+    </div>
   );
 };

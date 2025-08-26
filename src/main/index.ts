@@ -463,6 +463,24 @@ ipcMain.handle('close-floating-window', async () => {
   return true;
 });
 
+ipcMain.handle('resize-floating-window', async (_, width: number, height: number) => {
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    // Get current window bounds to preserve position
+    const bounds = floatingWindow.getBounds();
+    
+    // Animate the resize for smooth transition
+    floatingWindow.setBounds({
+      x: bounds.x,
+      y: bounds.y,
+      width: width,
+      height: height
+    }, true); // true enables animation on macOS
+    
+    return true;
+  }
+  return false;
+});
+
 ipcMain.handle('expand-to-main-window', async (event, sessionId?: string, notes?: string) => {
   if (floatingWindow) {
     floatingWindow.close();

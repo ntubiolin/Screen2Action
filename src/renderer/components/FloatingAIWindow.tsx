@@ -9,6 +9,7 @@ interface FloatingAIWindowProps {
   command?: string;
   onInsertScreenshot: (path: string) => void;
   onCopyScreenshot: (path: string) => void;
+  onCollapseChange?: (collapsed: boolean) => void;
 }
 
 interface ChatMessage {
@@ -25,10 +26,16 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
   screenshotPath,
   command,
   onInsertScreenshot,
-  onCopyScreenshot
+  onCopyScreenshot,
+  onCollapseChange
 }) => {
   console.log('FloatingAIWindow render:', { isVisible, screenshotPath, command });
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsedState] = useState(false);
+  
+  const setIsCollapsed = (collapsed: boolean) => {
+    setIsCollapsedState(collapsed);
+    onCollapseChange?.(collapsed);
+  };
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -177,48 +184,57 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
       <div 
         className="floating-ai-window"
         style={{
-          position: 'absolute',
-          bottom: isCollapsed ? '-100%' : '0',
-          left: '0',
           width: '100%',
-          height: '100%',
+          height: isCollapsed ? '40px' : '100%',
           backgroundColor: 'rgba(31, 41, 55, 0.95)',
           backdropFilter: 'blur(10px)',
           border: '1px solid rgba(75, 85, 99, 0.5)',
-          borderRadius: '8px',
-          display: isVisible ? 'flex' : 'none',
+          borderTop: 'none',
+          borderRadius: '0 0 8px 8px',
+          display: 'flex',
           flexDirection: 'column',
-          transition: 'bottom 0.3s ease-in-out',
-          zIndex: 100
+          transition: 'height 0.3s ease-in-out',
+          overflow: 'hidden'
         }}
       >
         {/* Header */}
         <div style={{
           height: '40px',
+          minHeight: '40px',
           padding: '8px',
-          borderBottom: '1px solid rgba(75, 85, 99, 0.3)',
+          borderBottom: isCollapsed ? 'none' : '1px solid rgba(75, 85, 99, 0.3)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
+          justifyContent: 'space-between',
+          cursor: isCollapsed ? 'pointer' : 'default'
+        }}
+        onClick={isCollapsed ? () => setIsCollapsed(false) : undefined}
+        >
           <span style={{ color: '#e5e7eb', fontSize: '14px', fontWeight: 500 }}>
-            AI Assistant
+            🤖 AI Assistant {isCollapsed && command ? `- "${command.substring(0, 30)}${command.length > 30 ? '...' : ''}"` : ''}
           </span>
           <button
-            onClick={() => setIsCollapsed(!isCollapsed)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsCollapsed(!isCollapsed);
+            }}
             style={{
               background: 'transparent',
               border: 'none',
               color: '#9ca3af',
               cursor: 'pointer',
-              padding: '4px'
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center'
             }}
+            title={isCollapsed ? 'Expand' : 'Collapse'}
           >
             {isCollapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
         </div>
 
         {/* Content Area */}
+        {!isCollapsed && (
         <div style={{
           flex: 1,
           display: 'flex',
@@ -409,33 +425,10 @@ export const FloatingAIWindow: React.FC<FloatingAIWindowProps> = ({
             </button>
           </div>
         </div>
+        )}
       </div>
 
-      {/* Collapse/Expand Toggle Button (shown when collapsed) */}
-      {isCollapsed && (
-        <button
-          onClick={() => setIsCollapsed(false)}
-          style={{
-            position: 'absolute',
-            bottom: '8px',
-            right: '8px',
-            width: '32px',
-            height: '32px',
-            backgroundColor: 'rgba(59, 130, 246, 0.8)',
-            border: 'none',
-            borderRadius: '4px',
-            color: 'white',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 101
-          }}
-          title="Expand AI Assistant"
-        >
-          <ChevronUp size={16} />
-        </button>
-      )}
+      {/* Collapse button is now in the header, so we don't need this separate button */}
 
       {/* Screenshot Preview Modal */}
       {previewScreenshot && (
