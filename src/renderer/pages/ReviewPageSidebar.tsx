@@ -1012,14 +1012,24 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                             <div
                               key={index}
                               className="relative cursor-pointer group"
-                              onClick={() => setPreviewScreenshot(screenshot.path)}
-                              title="Click to view full size"
+                              onClick={() => toggleScreenshotSelection(index)}
+                              onDoubleClick={() => setPreviewScreenshot(screenshot.path)}
+                              title="Click to select, double-click to preview"
                             >
                               <img
                                 src={`file://${screenshot.path}`}
                                 alt={`Screenshot at ${formatTimestamp(screenshot.timestamp)}`}
-                                className="w-full h-24 object-cover rounded border-2 transition-all border-gray-600 hover:border-blue-500"
+                                className={`w-full h-24 object-cover rounded border-2 transition-all ${
+                                  selectedScreenshots.has(index)
+                                    ? 'border-blue-500 ring-2 ring-blue-400'
+                                    : 'border-gray-600 hover:border-blue-400'
+                                }`}
                               />
+                              {selectedScreenshots.has(index) && (
+                                <div className="absolute top-1 right-1 bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
+                                  ✓
+                                </div>
+                              )}
                               <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 text-center">
                                 {formatTimestamp(screenshot.timestamp - currentParagraph.timestamp)}
                               </div>
