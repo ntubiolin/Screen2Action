@@ -302,9 +302,15 @@ app.whenReady().then(async () => {
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 
-  // Start with floating window as default
-  mainLogger.info('Creating floating window...');
-  createFloatingWindow();
+  // Start initial window: use main window first in E2E to make tests deterministic
+  const startInMain = process.env.PLAYWRIGHT_TEST === 'true';
+  if (startInMain) {
+    mainLogger.info('E2E mode detected; creating main window first');
+    createWindow();
+  } else {
+    mainLogger.info('Creating floating window...');
+    createFloatingWindow();
+  }
   
   // Initialize managers
   mainLogger.info('Initializing managers...');

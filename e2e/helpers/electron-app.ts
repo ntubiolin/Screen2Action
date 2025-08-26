@@ -40,11 +40,20 @@ export class ElectronAppHelper {
           
           console.log('Starting Python backend...');
           
+          // Prefer uv virtual environment python if available
+          const isWin = process.platform === 'win32';
+          const venvPython = isWin
+            ? path.join(backendPath, '.venv', 'Scripts', 'python.exe')
+            : path.join(backendPath, '.venv', 'bin', 'python');
+          const fallbackPython = isWin ? 'python' : 'python3';
+          const pythonCmd = fs.existsSync(venvPython) ? venvPython : fallbackPython;
+          console.log(`Using Python command: ${pythonCmd}`);
+          
           // Start the backend
-          this.backendProcess = spawn('python', ['run.py'], {
+          this.backendProcess = spawn(pythonCmd, ['run.py'], {
             cwd: backendPath,
             stdio: 'pipe',
-            env: { ...process.env }
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
           });
           
           // Wait for backend to be ready
@@ -138,7 +147,10 @@ export class ElectronAppHelper {
       env: {
         ...process.env,
         NODE_ENV: 'production',
-        PLAYWRIGHT_TEST: 'true'
+        PLAYWRIGHT_TEST: 'true',
+        // Prevent Electron main process from spawning another backend during E2E
+        // to avoid port conflicts and race conditions.
+        S2A_DISABLE_BACKEND: '1'
       }
     });
     

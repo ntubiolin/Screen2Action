@@ -26,11 +26,17 @@ except ImportError:
 
 
 def _expand_home(p: str) -> str:
+    """Expand a path that may begin with '~' in a robust, cross-platform way.
+
+    This avoids producing '/Documents' when given '~/Documents' by using
+    os.path.expanduser which correctly resolves the user home directory.
+    """
     if not p:
         return p
-    if p.startswith('~'):
-        return os.path.join(os.path.expanduser('~'), p[1:])
-    return p
+    # Use expanduser first to resolve '~' to absolute home directory path
+    expanded = os.path.expanduser(p)
+    # Normalize to absolute path
+    return os.path.abspath(expanded)
 
 
 def _resolve_logs_dir() -> Path:
