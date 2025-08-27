@@ -255,6 +255,42 @@ This creates a complete installer that bundles both the frontend and Python back
 
 See [DMG Build Guide](docs/DMG_BUILD_GUIDE.md) for detailed instructions.
 
+### Release Workflows (GitHub Actions)
+
+The repository includes two release workflows (in `.github/workflows/`):
+
+#### 1) Automatic Release on Version Tags (`release.yml`)
+- Triggers on: push of tags matching `v*.*.*` (e.g., `v1.0.0`, `v2.1.3`)
+- Builds for: macOS, Linux, and Windows in parallel
+- Creates: a GitHub Release with all platform artifacts automatically
+
+#### 2) Manual Release (`manual-release.yml`)
+- Triggers on: manual workflow dispatch from the GitHub Actions tab
+- Options:
+  - Specify version number
+  - Mark as pre-release
+  - Create as draft for review
+
+#### How to Use
+
+**Automatic Releases**
+```bash
+# Create and push a version tag
+git tag v1.0.0
+git push origin v1.0.0
+
+# Or create an annotated tag with a message
+git tag -a v1.0.0 -m "Release version 1.0.0"
+git push origin v1.0.0
+```
+
+**Manual Releases**
+1. Go to GitHub → Actions tab
+2. Select "Manual Build and Release"
+3. Click "Run workflow"
+4. Enter version and options
+5. Click "Run workflow" button
+
 ### Run Tests
 
 #### Frontend Tests
