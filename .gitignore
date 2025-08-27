@@ -82,3 +82,4 @@ temp/
 
 # Bob
 spec/
+.mcp.json
