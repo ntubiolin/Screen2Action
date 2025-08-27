@@ -1,0 +1,192 @@
+name: Manual Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      prerelease:
+        description: 'Is this a pre-release?'
+        required: true
+        type: boolean
+        default: false
+      draft:
+        description: 'Create as draft?'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - os: macos-latest
+            name: macOS
+            artifact_name: mac
+          - os: ubuntu-latest
+            name: Linux
+            artifact_name: linux
+          - os: windows-latest
+            name: Windows
+            artifact_name: windows
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+    
+    - name: Setup Python with uv
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+      shell: bash
+      if: matrix.os != 'windows-latest'
+    
+    - name: Install uv (Windows)
+      run: |
+        irm https://astral.sh/uv/install.ps1 | iex
+      shell: powershell
+      if: matrix.os == 'windows-latest'
+    
+    - name: Install Node dependencies
+      run: npm ci
+    
+    - name: Install Python dependencies
+      run: |
+        cd backend
+        uv venv
+        uv pip install -r requirements.txt
+        cd ..
+      shell: bash
+    
+    - name: Build Renderer
+      run: npm run build:renderer
+    
+    - name: Build Electron
+      run: npm run build:electron
+    
+    - name: Bundle Backend
+      run: npm run bundle:backend
+    
+    - name: Build for macOS
+      if: matrix.os == 'macos-latest'
+      run: |
+        npm run dist -- --mac
+      env:
+        CSC_IDENTITY_AUTO_DISCOVERY: false
+    
+    - name: Build for Linux
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        npm run dist -- --linux
+    
+    - name: Build for Windows
+      if: matrix.os == 'windows-latest'
+      run: |
+        npm run dist -- --win
+    
+    - name: Upload macOS artifacts
+      if: matrix.os == 'macos-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: mac-release
+        path: |
+          release/*.dmg
+          release/*.zip
+        if-no-files-found: error
+    
+    - name: Upload Linux artifacts
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-release
+        path: release/*.AppImage
+        if-no-files-found: error
+    
+    - name: Upload Windows artifacts
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-release
+        path: release/*.exe
+        if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: release-artifacts
+    
+    - name: Generate Release Notes
+      run: |
+        echo "# Screen2Action ${{ github.event.inputs.version }}" > release-notes.md
+        echo "" >> release-notes.md
+        echo "## Downloads" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "### macOS" >> release-notes.md
+        echo "- **DMG**: For standard installation" >> release-notes.md
+        echo "- **ZIP**: For portable use" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "### Windows" >> release-notes.md
+        echo "- **EXE**: NSIS installer for Windows" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "### Linux" >> release-notes.md
+        echo "- **AppImage**: Portable application for Linux" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "## Installation Instructions" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "### macOS" >> release-notes.md
+        echo "1. Download the DMG file" >> release-notes.md
+        echo "2. Open the DMG and drag Screen2Action to Applications" >> release-notes.md
+        echo "3. Right-click and select 'Open' for first-time launch (if security warning appears)" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "### Windows" >> release-notes.md
+        echo "1. Download the EXE installer" >> release-notes.md
+        echo "2. Run the installer and follow the prompts" >> release-notes.md
+        echo "3. Launch Screen2Action from Start Menu or Desktop" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "### Linux" >> release-notes.md
+        echo "1. Download the AppImage file" >> release-notes.md
+        echo "2. Make it executable: \`chmod +x Screen2Action-*.AppImage\`" >> release-notes.md
+        echo "3. Run the AppImage: \`./Screen2Action-*.AppImage\`" >> release-notes.md
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.version }}
+        name: Screen2Action ${{ github.event.inputs.version }}
+        body_path: release-notes.md
+        draft: ${{ github.event.inputs.draft }}
+        prerelease: ${{ github.event.inputs.prerelease }}
+        files: |
+          release-artifacts/mac-release/*.dmg
+          release-artifacts/mac-release/*.zip
+          release-artifacts/linux-release/*.AppImage
+          release-artifacts/windows-release/*.exe
+        fail_on_unmatched_files: true
+        generate_release_notes: true
