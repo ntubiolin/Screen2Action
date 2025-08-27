@@ -22,7 +22,6 @@ pytesseract==0.3.13
 easyocr==1.7.2
 
 # Audio Processing
-pyaudio==0.2.14
 sounddevice==0.5.1
 scipy==1.15.1
 

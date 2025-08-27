@@ -53,17 +53,6 @@ jobs:
       shell: powershell
       if: matrix.os == 'windows-latest'
     
-    - name: Install system dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y portaudio19-dev
-    
-    - name: Install system dependencies (macOS)
-      if: matrix.os == 'macos-latest'
-      run: |
-        brew install portaudio
-    
     - name: Install Node dependencies
       run: npm ci
     
