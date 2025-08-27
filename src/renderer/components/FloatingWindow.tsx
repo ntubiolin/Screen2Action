@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { useRecordingStore } from '../store/recordingStore';
 import { FloatingAIWindow } from './FloatingAIWindow';
+import { useDirectQuery } from '../hooks/useDirectQuery';
 
 interface FloatingWindowProps {
   onExpand: (sessionId?: string, notes?: string) => void;
@@ -48,6 +49,9 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const aiContainerRef = useRef<HTMLDivElement | null>(null);
   
   const { addNote, clearNotes, setRecordingDuration } = useRecordingStore();
+  
+  // Use direct query hook
+  const { checkForDirectQuery } = useDirectQuery();
   
   // Heading detection regex
   const headingLineRegex = /^#{1,6}\s+/;
@@ -653,6 +657,11 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   
   // Handle potential AI trigger on content change
   const checkForAITriggerOnEnter = (editor: any, changes: any) => {
+    // Check for >>> direct query trigger first
+    if (checkForDirectQuery(editor, changes)) {
+      return; // Query was handled, don't process as regular AI trigger
+    }
+    
     // Check if Enter key was pressed
     const hasEnter = changes.some((change: any) => 
       change.text.includes('\n')
@@ -671,6 +680,8 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
     if (previousLineNumber < 1) return;
     
     const previousLineContent = model.getLineContent(previousLineNumber);
+    
+    // Check for !!! AI trigger
     const match = previousLineContent.match(aiTriggerRegex);
     
     if (match) {
@@ -738,7 +749,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       keybindings: [
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyM
       ],
-      run: (ed: any) => {
+      run: (_ed: any) => {
         // TODO: Implement jump to position 10 seconds ago
         console.log('Jump to previous position');
       }

@@ -98,6 +98,126 @@ class LLMService:
             logger.error(f"Failed to enhance note: {e}")
             return {"response": f"Error processing request: {str(e)}"}
     
+    async def process_direct_query(self, query: str) -> Dict[str, Any]:
+        """Process a direct query without screenshot, with web search capability"""
+        if not self.client:
+            return {
+                "success": False,
+                "message": "LLM service not configured. Please set OPENAI_API_KEY or Azure OpenAI credentials."
+            }
+        
+        try:
+            # Try to use the newer Responses API with web search if available
+            # Note: This requires specific model support (e.g., gpt-4-turbo-preview or later)
+            use_responses_api = False  # Set to True when Responses API is available
+            
+            if use_responses_api and hasattr(self.client, 'responses'):
+                try:
+                    # Use the Responses API with web search tool
+                    response = self.client.responses.create(
+                        model=self.model,
+                        instructions="You are a helpful assistant with web search capability. Answer questions accurately using web search when needed.",
+                        input=query,
+                        tools=[
+                            {
+                                "type": "web_search",
+                                "web_search": {
+                                    "enabled": True
+                                }
+                            }
+                        ],
+                        tool_choice="auto"
+                    )
+                    
+                    # Handle response based on format
+                    if hasattr(response, 'output_text'):
+                        result = response.output_text
+                    elif hasattr(response, 'choices') and response.choices:
+                        result = response.choices[0].message.content
+                    else:
+                        result = str(response)
+                    
+                    # Check if web search was used
+                    web_search_used = False
+                    if hasattr(response, 'tool_calls') and response.tool_calls:
+                        for tool_call in response.tool_calls:
+                            if tool_call.type == 'web_search':
+                                web_search_used = True
+                                logger.info(f"Web search was used for query: {query[:50]}...")
+                    
+                    return {
+                        "success": True,
+                        "message": result,
+                        "web_search_used": web_search_used
+                    }
+                    
+                except AttributeError as e:
+                    logger.warning(f"Responses API not available, falling back to Chat Completions: {e}")
+                except Exception as e:
+                    logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
+            
+            # Fallback to standard Chat Completions API with function calling for web search simulation
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a helpful assistant. Answer the user's question concisely and accurately. If the question requires current information or web search, indicate that in your response."
+                    },
+                    {"role": "user", "content": query}
+                ],
+                temperature=0.7,
+                max_tokens=1000,
+                # Optional: Add function calling for web search simulation
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "web_search",
+                            "description": "Search the web for current information",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {
+                                        "type": "string",
+                                        "description": "The search query"
+                                    }
+                                },
+                                "required": ["query"]
+                            }
+                        }
+                    }
+                ] if self.model in ["gpt-4-turbo-preview", "gpt-4-turbo", "gpt-4o", "gpt-4o-mini"] else None,
+                tool_choice="auto" if self.model in ["gpt-4-turbo-preview", "gpt-4-turbo", "gpt-4o", "gpt-4o-mini"] else None
+            )
+            
+            # Process the response
+            message = response.choices[0].message
+            result = message.content
+            
+            # Check if the model wanted to use web search
+            web_search_requested = False
+            if hasattr(message, 'tool_calls') and message.tool_calls:
+                for tool_call in message.tool_calls:
+                    if tool_call.function.name == 'web_search':
+                        web_search_requested = True
+                        search_args = tool_call.function.arguments
+                        logger.info(f"Web search requested but not implemented: {search_args}")
+                        result = f"{result}\n\n[Note: Web search was requested but is not currently implemented. The answer is based on knowledge up to the training cutoff.]"
+            
+            return {
+                "success": True,
+                "message": result,
+                "web_search_requested": web_search_requested
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to process direct query: {e}")
+            return {
+                "success": False,
+                "message": f"Error processing query: {str(e)}"
+            }
+    
     async def analyze_screenshot(self, command: str, screenshot_path: str, support_grounding: bool = False) -> Dict[str, Any]:
         """Analyze screenshot with VLM grounding capabilities"""
         if not self.client:
