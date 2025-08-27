@@ -302,9 +302,16 @@ app.whenReady().then(async () => {
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 
-  // Start initial window: use main window first in E2E to make tests deterministic
+  // Start initial window:
+  // - If S2A_E2E_FLOATING_ONLY=1, open only the floating window (no main)
+  // - Else if in E2E, open main window first for determinism
+  // - Else default to floating window
+  const floatingOnly = process.env.S2A_E2E_FLOATING_ONLY === '1';
   const startInMain = process.env.PLAYWRIGHT_TEST === 'true';
-  if (startInMain) {
+  if (floatingOnly) {
+    mainLogger.info('Floating-only mode enabled; creating floating window only');
+    createFloatingWindow();
+  } else if (startInMain) {
     mainLogger.info('E2E mode detected; creating main window first');
     createWindow();
   } else {

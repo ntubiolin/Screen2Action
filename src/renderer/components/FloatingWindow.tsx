@@ -24,6 +24,8 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   const [selectedScreen, setSelectedScreen] = useState<string>('');
   const [sources, setSources] = useState<any[]>([]);
   const [conversionMessage, setConversionMessage] = useState<string>('');
+  const [isLoadingSources, setIsLoadingSources] = useState(true);
+  const canStart = !isLoadingSources && (!!selectedScreen || sources.length > 0);
   
   // AI Window state
   const [showAIWindow, setShowAIWindow] = useState(false);
@@ -154,6 +156,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   }, []);
 
   const loadSources = async () => {
+    setIsLoadingSources(true);
     try {
       const desktopSources = await window.electronAPI.sources.getDesktopSources();
       setSources(desktopSources);
@@ -162,6 +165,8 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
       }
     } catch (error) {
       console.error('Failed to load sources:', error);
+    } finally {
+      setIsLoadingSources(false);
     }
   };
 
@@ -260,17 +265,24 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
   };
 
   const handleStartRecording = async () => {
-    if (!selectedScreen) {
-      // If no screen selected, try to use the first available one
-      if (sources.length === 0) {
-        await loadSources();
+    // Resolve a screen to record synchronously from the freshest data
+    let screenToRecord = selectedScreen;
+    if (!screenToRecord) {
+      let availableSources = sources;
+      if (availableSources.length === 0) {
+        try {
+          availableSources = await window.electronAPI.sources.getDesktopSources();
+          setSources(availableSources);
+        } catch (e) {
+          console.error('Failed to load sources in handleStartRecording:', e);
+          availableSources = [];
+        }
       }
-      if (sources.length > 0 && !selectedScreen) {
-        setSelectedScreen(sources[0].id);
+      if (availableSources.length > 0) {
+        screenToRecord = availableSources[0].id;
+        setSelectedScreen(screenToRecord);
       }
     }
-    
-    const screenToRecord = selectedScreen || (sources.length > 0 ? sources[0].id : '');
     if (!screenToRecord) {
       alert('No screen available to record');
       return;
@@ -840,13 +852,14 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({ onExpand, onClos
               border: 'none',
               borderRadius: '4px',
               padding: '4px 8px',
-              cursor: 'pointer',
+              cursor: canStart ? 'pointer' : 'not-allowed',
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
               fontSize: '12px',
               WebkitAppRegion: 'no-drag'  // Make button clickable
             } as React.CSSProperties}
+            disabled={!canStart}
           >
             <span style={{
               width: '8px',

@@ -10,6 +10,14 @@ export class ElectronAppHelper {
   private app: ElectronApplication | null = null;
   private page: Page | null = null;
   private backendProcess: ChildProcess | null = null;
+  private extraEnv: Record<string, string> = {};
+  
+  /**
+   * Provide extra environment variables to be used when launching Electron
+   */
+  setExtraEnv(vars: Record<string, string>): void {
+    this.extraEnv = { ...this.extraEnv, ...vars };
+  }
   
   /**
    * Start the Python backend server
@@ -150,7 +158,8 @@ export class ElectronAppHelper {
         PLAYWRIGHT_TEST: 'true',
         // Prevent Electron main process from spawning another backend during E2E
         // to avoid port conflicts and race conditions.
-        S2A_DISABLE_BACKEND: '1'
+        S2A_DISABLE_BACKEND: '1',
+        ...this.extraEnv,
       }
     });
     
