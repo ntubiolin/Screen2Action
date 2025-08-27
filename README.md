@@ -288,14 +288,62 @@ uv run pytest -v
 uv run pytest -m "not slow"
 ```
 
-#### End-to-End Tests
+#### End-to-End Tests (Playwright)
 ```bash
-# Run E2E tests (requires both frontend and backend running)
+# Run E2E tests for Electron app (builds app and starts backend automatically)
 npm run test:e2e
 
-# Run E2E tests in headless mode
-npm run test:e2e:headless
+# Run E2E tests with UI (interactive mode)
+npm run test:e2e:ui
+
+# Run E2E tests in headed mode (see browser)
+npm run test:e2e:headed
+
+# Debug E2E tests
+npm run test:e2e:debug
 ```
+
+The E2E tests will:
+- Automatically build the Electron app
+- Start the Python backend server if not running
+- Launch the Electron application
+- Test complete workflows including:
+  - Recording with voice narration
+  - Adding notes with H1 paragraphs
+  - Stopping recording and navigating to review
+  - Playing audio in the review page
+  - Verifying timestamps and note synchronization
+
+#### Git Hooks (pre-commit)
+
+On every commit, a Husky pre-commit hook runs these steps in order:
+
+1) Frontend unit tests (Jest)
+```bash
+npm run test
+```
+
+2) Backend unit tests (pytest via uv)
+```bash
+cd backend
+uv run pytest -q
+```
+
+3) E2E tests (Playwright for Electron)
+```bash
+npm run test:e2e
+```
+
+Notes:
+- Any failure blocks the commit. Use `--no-verify` to bypass in emergencies.
+- E2E includes a full build; commits will take longer.
+- Ensure `uv` is installed for backend tests.
+
+#### E2E Floating Window Mode
+
+For automated tests, the Electron main process supports a floating-only mode:
+- Set `S2A_E2E_FLOATING_ONLY=1` in the environment before launch to create only the floating window.
+- Tests can still expand to the main window to validate the review flow.
 
 #### Integration Tests
 ```bash

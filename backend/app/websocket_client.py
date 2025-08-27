@@ -14,7 +14,10 @@ class WebSocketClient:
         self.url = url
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.message_handler: Optional[Callable] = None
+        # running indicates an active connection
         self.running = False
+        # _stop is set to True when a graceful shutdown is requested
+        self._stop = False
         
     async def connect(self):
         """Connect to the Electron WebSocket server"""
@@ -29,6 +32,8 @@ class WebSocketClient:
     
     async def disconnect(self):
         """Disconnect from the WebSocket server"""
+        # Mark stop requested so run() loop can exit
+        self._stop = True
         self.running = False
         if self.websocket:
             await self.websocket.close()
@@ -96,24 +101,47 @@ class WebSocketClient:
         self.message_handler = handler
     
     async def run(self):
-        """Run the WebSocket client with auto-reconnect"""
-        while True:
+        """Run the WebSocket client with robust auto-reconnect.
+
+        Keeps attempting to connect to the Electron WebSocket server until a
+        graceful shutdown is requested via disconnect().
+        """
+        backoff_seconds = 2
+        max_backoff = 10
+
+        while not self._stop:
             try:
-                if await self.connect():
-                    await self.listen()
-                
-                if not self.running:
+                connected = await self.connect()
+                if not connected:
+                    if self._stop:
+                        break
+                    logger.info(f"Connect failed; retrying in {backoff_seconds}s...")
+                    await asyncio.sleep(backoff_seconds)
+                    backoff_seconds = min(max_backoff, backoff_seconds * 2)
+                    continue
+
+                # Reset backoff after successful connection
+                backoff_seconds = 2
+
+                # Listen until connection closes or stop requested
+                await self.listen()
+
+                if self._stop:
                     break
-                    
-                # Wait before reconnecting
-                logger.info("Reconnecting in 5 seconds...")
+
+                # Connection closed; attempt to reconnect after a short delay
+                logger.info("Connection closed; reconnecting in 5 seconds...")
                 await asyncio.sleep(5)
-                
+
             except KeyboardInterrupt:
                 logger.info("Shutting down WebSocket client")
                 break
             except Exception as e:
+                if self._stop:
+                    break
                 logger.error(f"Unexpected error: {e}")
                 await asyncio.sleep(5)
-        
-        await self.disconnect()
+
+        # Ensure we are disconnected when loop exits
+        if self.websocket:
+            await self.disconnect()
