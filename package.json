@@ -26,7 +26,13 @@
     "test:e2e:headed": "npm run build && playwright test --headed",
     "test:e2e:debug": "npm run build && playwright test --debug",
     "test:e2e:ui": "npm run build && playwright test --ui",
-    "prepare": "husky"
+    "prepare": "husky",
+    "docker:build": "chmod +x scripts/docker-build.sh && scripts/docker-build.sh",
+    "docker:build:mac": "chmod +x scripts/docker-build.sh && scripts/docker-build.sh --target mac",
+    "docker:build:win": "chmod +x scripts/docker-build.sh && scripts/docker-build.sh --target win",
+    "docker:build:linux": "chmod +x scripts/docker-build.sh && scripts/docker-build.sh --target linux",
+    "docker:build:clean": "chmod +x scripts/docker-build.sh && scripts/docker-build.sh --clean",
+    "docker:dev": "docker-compose up dev"
   },
   "keywords": [],
   "author": "",

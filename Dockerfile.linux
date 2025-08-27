@@ -1,0 +1,57 @@
+# Simplified Linux build for testing
+FROM node:20-bullseye
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgtk-3-0 \
+    libnotify-dev \
+    libgconf-2-4 \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libxtst6 \
+    xauth \
+    xvfb \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files
+COPY package*.json ./
+COPY electron-builder.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code and configs
+COPY tsconfig*.json ./
+COPY vite.config*.mjs ./
+COPY tailwind.config.js ./
+COPY postcss.config.js ./
+COPY src ./src
+COPY index.html ./
+COPY backend ./backend
+
+# Copy assets and build files
+COPY assets ./assets
+COPY resources ./resources
+COPY build ./build
+
+# Create dist-backend directory (simplified - just copy backend)
+RUN mkdir -p dist-backend && cp -r backend/* dist-backend/
+
+# Build the application
+RUN npm run build:renderer && npm run build:electron
+
+# Build Electron Linux package
+RUN npm run dist -- --linux --x64
+
+# Create output directory
+RUN mkdir -p /output/release && cp -r release/* /output/release/ || true
+
+VOLUME ["/output/release"]
+
+CMD ["sh", "-c", "ls -la release/ && cp -r release/* /output/release/ 2>/dev/null || echo 'No release files found'"]

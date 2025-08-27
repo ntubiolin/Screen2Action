@@ -1,0 +1,36 @@
+# Test Dockerfile - Simplified version for testing
+FROM node:20-slim AS test-builder
+
+WORKDIR /app
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files
+COPY package*.json ./
+
+# Install Node dependencies
+RUN npm ci --omit=dev || npm install
+
+# Copy source files
+COPY . .
+
+# Simple test: list files and check structure
+RUN echo "=== Project Structure ===" && \
+    ls -la && \
+    echo "=== Node modules installed ===" && \
+    ls node_modules | head -10 && \
+    echo "=== Backend files ===" && \
+    ls -la backend/ | head -10
+
+# Test build commands
+RUN echo "Testing build commands..." && \
+    npm run build:renderer && \
+    npm run build:electron && \
+    echo "Build test completed!"
+
+CMD ["echo", "Docker test build successful!"]
