@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
+import ReactMarkdown from 'react-markdown';
 import { 
   Camera, 
   Play, 
@@ -9,7 +10,9 @@ import {
   ChevronLeft,
   ChevronDown,
   ChevronUp,
-  Download
+  Download,
+  Eye,
+  Edit
 } from 'lucide-react';
 
 interface ReviewPageSidebarProps {
@@ -39,6 +42,7 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [currentParagraph, setCurrentParagraph] = useState<ParsedNote | null>(null);
   const [cursorLine, setCursorLine] = useState(1);
   const [decorationIds, setDecorationIds] = useState<string[]>([]);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [sectionHeights, setSectionHeights] = useState({
     screenshots: 35,
     mcp: 30,
@@ -58,21 +62,27 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
   const [zoomLevel, setZoomLevel] = useState(1);
   const [copySuccess, setCopySuccess] = useState(false);
   
-  // Handle ESC key to close screenshot preview modal
+  // Handle keyboard shortcuts
   useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      // ESC key to close screenshot preview modal
       if (event.key === 'Escape' && previewScreenshot) {
         setPreviewScreenshot(null);
         setZoomLevel(1);
+        return;
+      }
+      
+      // Ctrl/Cmd + Shift + P to toggle preview mode
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'P') {
+        event.preventDefault();
+        setIsPreviewMode(prev => !prev);
       }
     };
 
-    if (previewScreenshot) {
-      document.addEventListener('keydown', handleEscape);
-    }
+    document.addEventListener('keydown', handleKeyPress);
 
     return () => {
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleKeyPress);
     };
   }, [previewScreenshot]);
   
@@ -902,32 +912,125 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
           </div>
         </div>
 
-        {/* Monaco Editor */}
+        {/* Monaco Editor with Preview Toggle */}
         <div className="flex-1 p-4">
-          <div className="h-full bg-gray-800 rounded-lg overflow-hidden">
-            <Editor
-              height="100%"
-              defaultLanguage="markdown"
-              theme="vs-dark"
-              value={markdownContent}
-              onChange={handleContentChange}
-              onMount={handleEditorMount}
-              options={{
-                fontSize: 14,
-                wordWrap: 'on',
-                lineNumbers: 'on',
-                minimap: { enabled: true },
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-                padding: { top: 10, bottom: 10 },
-                lineHeight: 21,
-                renderLineHighlight: 'all',
-                renderLineHighlightOnlyWhenFocus: false,
-                contextmenu: true,
-                overviewRulerLanes: 3,
-                overviewRulerBorder: false
-              }}
-            />
+          <div className="h-full bg-gray-800 rounded-lg overflow-hidden flex flex-col">
+            {/* Preview Mode Toggle Button */}
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-700 border-b border-gray-600">
+              <h3 className="text-sm font-medium text-gray-200">
+                {isPreviewMode ? 'Preview Mode' : 'Edit Mode'}
+              </h3>
+              <button
+                onClick={() => setIsPreviewMode(!isPreviewMode)}
+                className="flex items-center gap-2 px-3 py-1 text-sm bg-gray-600 hover:bg-gray-500 text-gray-200 rounded transition-colors"
+                title={`${isPreviewMode ? 'Switch to Edit Mode' : 'Switch to Preview Mode'} (Ctrl+Shift+P)`}
+              >
+                {isPreviewMode ? (
+                  <>
+                    <Edit size={16} />
+                    <span>Edit</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye size={16} />
+                    <span>Preview</span>
+                  </>
+                )}
+              </button>
+            </div>
+            
+            {/* Content Area */}
+            <div className="flex-1 overflow-hidden">
+              {isPreviewMode ? (
+                /* Markdown Preview */
+                <div className="h-full overflow-y-auto p-6 prose prose-invert prose-sm max-w-none
+                  prose-headings:text-gray-200 prose-p:text-gray-300 prose-strong:text-gray-200
+                  prose-em:text-gray-300 prose-code:text-blue-300 prose-code:bg-gray-700
+                  prose-pre:bg-gray-900 prose-pre:border prose-pre:border-gray-700
+                  prose-blockquote:border-gray-600 prose-blockquote:text-gray-400
+                  prose-hr:border-gray-600 prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
+                  prose-ul:text-gray-300 prose-ol:text-gray-300 prose-li:text-gray-300
+                  prose-table:text-gray-300 prose-th:text-gray-200 prose-td:text-gray-300
+                  prose-th:border-gray-600 prose-td:border-gray-700">
+                  <ReactMarkdown
+                    components={{
+                      img: ({node, ...props}) => {
+                        // Handle local file:// protocol images
+                        let src = props.src || '';
+                        const alt = props.alt || 'Screenshot';
+                        
+                        // Ensure file:// protocol is properly formatted
+                        if (!src.startsWith('file://') && src.startsWith('/')) {
+                          src = `file://${src}`;
+                        }
+                        
+                        return (
+                          <div className="my-4">
+                            <img 
+                              src={src}
+                              alt={alt}
+                              className="rounded-lg border border-gray-600 max-w-full h-auto cursor-pointer hover:border-blue-500 transition-colors"
+                              onDoubleClick={() => {
+                                // Extract the file path and open in preview modal on double-click
+                                if (src.startsWith('file://')) {
+                                  setPreviewScreenshot(src.replace('file://', ''));
+                                }
+                              }}
+                              onError={(e) => {
+                                // Handle image load errors
+                                console.error('Failed to load image:', src);
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                                // Show error message
+                                const errorDiv = document.createElement('div');
+                                errorDiv.className = 'text-center p-4 bg-gray-800 rounded border border-gray-600';
+                                errorDiv.innerHTML = `
+                                  <svg class="w-12 h-12 text-gray-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                  <p class="text-sm text-gray-400">Image not found</p>
+                                  <p class="text-xs text-gray-500 mt-1">${alt}</p>
+                                `;
+                                target.parentElement?.appendChild(errorDiv);
+                              }}
+                              title="Double-click to view full size"
+                            />
+                            <p className="text-xs text-gray-500 mt-1 text-center">{alt}</p>
+                          </div>
+                        );
+                      }
+                    }}
+                  >
+                    {markdownContent}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                /* Monaco Editor */
+                <Editor
+                  height="100%"
+                  defaultLanguage="markdown"
+                  theme="vs-dark"
+                  value={markdownContent}
+                  onChange={handleContentChange}
+                  onMount={handleEditorMount}
+                  options={{
+                    fontSize: 14,
+                    wordWrap: 'on',
+                    lineNumbers: 'on',
+                    minimap: { enabled: true },
+                    automaticLayout: true,
+                    scrollBeyondLastLine: false,
+                    padding: { top: 10, bottom: 10 },
+                    lineHeight: 21,
+                    renderLineHighlight: 'all',
+                    renderLineHighlightOnlyWhenFocus: false,
+                    contextmenu: true,
+                    overviewRulerLanes: 3,
+                    overviewRulerBorder: false
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1020,14 +1123,17 @@ export const ReviewPageSidebar: React.FC<ReviewPageSidebarProps> = ({ sessionId 
                                 src={`file://${screenshot.path}`}
                                 alt={`Screenshot at ${formatTimestamp(screenshot.timestamp)}`}
                                 className={`w-full h-24 object-cover rounded border-2 transition-all ${
-                                  selectedScreenshots.has(index)
-                                    ? 'border-blue-500 ring-2 ring-blue-400'
-                                    : 'border-gray-600 hover:border-blue-400'
+                                  selectedScreenshots.has(index) 
+                                    ? 'border-blue-500 ring-2 ring-blue-400' 
+                                    : 'border-gray-600 hover:border-blue-500'
                                 }`}
                               />
+                              {/* Selection indicator */}
                               {selectedScreenshots.has(index) && (
-                                <div className="absolute top-1 right-1 bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
-                                  ✓
+                                <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-1">
+                                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
                                 </div>
                               )}
                               <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 text-center">
