@@ -191,6 +191,15 @@ async def startup_event():
                     payload.get('supportGrounding', False)
                 )
                 await electron_client.send_response(data['id'], result)
+            elif data.get('action') == 'direct_query':
+                # Handle direct query without screenshot
+                logger.info("Processing direct_query action")
+                payload = data.get('payload', {})
+                query = payload.get('query', '')
+                
+                # Process the query with LLM (without screenshot)
+                result = await llm_service.process_direct_query(query)
+                await electron_client.send_response(data['id'], result)
             else:
                 logger.warning(f"Unknown action: {data.get('action')}")
                 if 'id' in data:

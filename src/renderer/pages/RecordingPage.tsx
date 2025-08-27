@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { useRecordingStore } from '../store/recordingStore';
+import { useDirectQuery } from '../hooks/useDirectQuery';
 
 interface RecordingPageProps {
   onRecordingComplete: (sessionId: string) => void;
@@ -19,7 +20,10 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
   const sessionIdRef = useRef<string | null>(null);
   const recordingStartTimeRef = useRef<number>(0);
   
-  const { addNote, clearNotes, audioDevices, setAudioDevices, selectedMic, selectedSystem, setSelectedMic, setSelectedSystem, setRecordingDuration } = useRecordingStore();
+  const { addNote, clearNotes, selectedMic, selectedSystem, setSelectedMic, setSelectedSystem, setRecordingDuration } = useRecordingStore();
+  
+  // Use direct query hook
+  const { checkForDirectQuery } = useDirectQuery();
 
   // --- Heading timestamp (non-intrusive) ---
   const headingLineRegex = /^#{1,6}\s+/; // H1~H6
@@ -339,8 +343,10 @@ export const RecordingPage: React.FC<RecordingPageProps> = ({ onRecordingComplet
     updateHeadingWidgets();
     // Initialize prev keys so only new headings get timestamps while recording
     try { updateHeadingTimestamps(notes || ''); } catch {}
-    editor.onDidChangeModelContent(() => {
+    editor.onDidChangeModelContent((e: any) => {
       updateHeadingTimestamps(editor.getValue());
+      // Check for direct query trigger on Enter
+      checkForDirectQuery(editor, e.changes);
     });
   };
 
