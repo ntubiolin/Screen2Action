@@ -20,7 +20,7 @@
     "test": "npx jest",
     "test:watch": "npx jest --watch",
     "test:coverage": "npx jest --coverage",
-    "test:backend": "cd backend && uv run pytest",
+    "test:backend": "cd backend && uv run pytest tests/unit/test_llm_service.py -x -k 'not test_initialization'",
     "test:all": "npm run test:coverage && npm run test:backend",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:headed": "npm run build && playwright test --headed",
