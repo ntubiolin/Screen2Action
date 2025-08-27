@@ -291,6 +291,38 @@ git push origin v1.0.0
 4. Enter version and options
 5. Click "Run workflow" button
 
+### Continuous Integration
+
+#### GitHub Actions
+
+The project uses GitHub Actions for automated testing on all pull requests:
+
+- **Frontend Tests**: Run Jest unit tests with coverage reporting
+- **Backend Tests**: Run pytest tests using uv
+- **Test Status Required**: Pull requests must pass all tests before merging to main
+
+#### Branch Protection Rules
+
+To ensure code quality, configure the following branch protection rules for the `main` branch in your GitHub repository settings:
+
+1. Go to **Settings** → **Branches**
+2. Add a branch protection rule for `main`
+3. Enable these settings:
+   - ✅ **Require a pull request before merging**
+   - ✅ **Require status checks to pass before merging**
+     - Select `frontend-tests`
+     - Select `backend-tests`
+     - Select `all-tests-pass`
+   - ✅ **Require branches to be up to date before merging**
+   - ✅ **Dismiss stale pull request approvals when new commits are pushed**
+   - Optional: **Require conversation resolution before merging**
+
+This ensures that:
+- All code changes go through pull requests
+- Both frontend and backend tests must pass
+- The branch is up-to-date with main before merging
+- Tests are re-run when new commits are added
+
 ### Run Tests
 
 #### Frontend Tests
