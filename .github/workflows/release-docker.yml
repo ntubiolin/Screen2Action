@@ -1,9 +1,8 @@
 name: Build and Release (Docker)
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'  # Trigger on version tags like v1.0.0, v2.1.3, etc.
+  release:
+    types: [published]  # Trigger when a release is published
   workflow_dispatch:  # Allow manual trigger for testing
     inputs:
       version:
@@ -14,8 +13,6 @@ on:
         description: 'Tag name (e.g., v1.0.0)'
         required: false
         type: string
-  release:
-    types: [published]  # Also trigger when a release is published
 
 permissions:
   contents: write  # Required for creating releases
