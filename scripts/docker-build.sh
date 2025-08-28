@@ -15,6 +15,7 @@ NC='\033[0m' # No Color
 BUILD_TARGET="all"
 CLEAN_BUILD=false
 VERBOSE=false
+USE_BASE_IMAGE=true
 
 # Function to print colored output
 print_message() {
@@ -34,13 +35,15 @@ OPTIONS:
     -t, --target <platform>  Build target: mac, win, linux, or all (default: all)
     -c, --clean             Clean build (removes previous builds)
     -v, --verbose           Verbose output
+    -b, --no-base           Don't use base image (full rebuild)
     -h, --help              Show this help message
 
 EXAMPLES:
-    $0                      # Build for all platforms
+    $0                      # Build for all platforms using base image
     $0 --target mac         # Build only for macOS
     $0 --target win --clean # Clean build for Windows
     $0 -t linux -v          # Verbose build for Linux
+    $0 --no-base            # Full rebuild without base image
 
 EOF
 }
@@ -58,6 +61,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -v|--verbose)
             VERBOSE=true
+            shift
+            ;;
+        -b|--no-base)
+            USE_BASE_IMAGE=false
             shift
             ;;
         -h|--help)
@@ -139,6 +146,19 @@ build_platform() {
 # Main build process
 print_message $GREEN "=== Screen2Action Docker Build ==="
 print_message $YELLOW "Target: $BUILD_TARGET"
+
+# Build or update base image if using it
+if [ "$USE_BASE_IMAGE" = true ]; then
+    print_message $GREEN "Checking base image..."
+    chmod +x scripts/docker-base-build.sh
+    ./scripts/docker-base-build.sh || {
+        print_message $RED "Failed to prepare base image"
+        exit 1
+    }
+    DOCKERFILE="Dockerfile.optimized"
+else
+    DOCKERFILE="Dockerfile"
+fi
 
 # Ensure backend lock file exists
 if [ ! -f "backend/uv.lock" ]; then

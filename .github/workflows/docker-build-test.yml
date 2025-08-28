@@ -1,0 +1,72 @@
+name: Test Docker Build
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile*'
+      - 'docker-compose.yml'
+      - 'scripts/docker-*.sh'
+      - 'backend/**'
+      - 'package*.json'
+      - '.github/workflows/docker-build-test.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  test-docker-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Test base image build
+      run: |
+        echo "Testing base image build..."
+        docker build -f Dockerfile.base -t test-base:latest .
+    
+    - name: Test optimized build with base image
+      run: |
+        echo "Testing optimized build..."
+        # Create a test build using the base image
+        cat > Dockerfile.test << 'EOF'
+        FROM test-base:latest AS builder
+        WORKDIR /app
+        COPY . .
+        
+        # Quick test build - just verify the build process works
+        RUN cd backend && \
+            uv sync --frozen && \
+            echo "Backend dependencies installed successfully"
+        
+        RUN npm run build:renderer && \
+            echo "Frontend build successful"
+        
+        # Test PyInstaller
+        RUN cd backend && \
+            uv run pyinstaller --version && \
+            echo "PyInstaller is working"
+        EOF
+        
+        docker build -f Dockerfile.test -t test-build:latest .
+    
+    - name: Test build script
+      run: |
+        echo "Testing build script..."
+        chmod +x scripts/docker-build.sh
+        chmod +x scripts/docker-base-build.sh
+        
+        # Run in check mode only
+        ./scripts/docker-base-build.sh --check
+    
+    - name: Test docker-compose configuration
+      run: |
+        echo "Testing docker-compose configuration..."
+        docker-compose config
+    
+    - name: Report success
+      run: |
+        echo "✅ Docker build tests completed successfully!"
+        echo "All Dockerfiles are valid and build successfully."

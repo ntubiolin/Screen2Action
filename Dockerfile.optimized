@@ -1,0 +1,35 @@
+# Optimized Dockerfile using pre-built base image
+# Usage: docker build -f Dockerfile.optimized -t screen2action:latest .
+
+# Use pre-built base image with all dependencies
+FROM screen2action-base:latest AS builder
+
+WORKDIR /app
+
+# Copy source code
+COPY . .
+
+# Build backend with PyInstaller
+WORKDIR /app/backend
+RUN uv sync --frozen && \
+    uv run pyinstaller main.spec --distpath dist
+
+# Build frontend
+WORKDIR /app
+RUN npm run build:renderer && \
+    npm run build:electron
+
+# Build releases with electron-builder
+RUN npm run dist -- --linux --win --publish=never
+
+# Final stage - collect artifacts
+FROM alpine:latest AS output
+WORKDIR /output
+
+# Copy built releases
+COPY --from=builder /app/release ./release
+
+# Copy bundled backend
+COPY --from=builder /app/backend/dist/screen2action-backend ./backend
+
+CMD ["sh", "-c", "echo 'Build complete. Artifacts in /output'"]
