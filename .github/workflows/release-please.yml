@@ -1,0 +1,72 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      major: ${{ steps.release.outputs.major }}
+      minor: ${{ steps.release.outputs.minor }}
+      patch: ${{ steps.release.outputs.patch }}
+    
+    steps:
+      - name: Release Please
+        uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release-type: node
+          package-name: screen2action
+          changelog-types: |
+            [
+              {"type": "feat", "section": "Features", "hidden": false},
+              {"type": "fix", "section": "Bug Fixes", "hidden": false},
+              {"type": "perf", "section": "Performance Improvements", "hidden": false},
+              {"type": "docs", "section": "Documentation", "hidden": false},
+              {"type": "chore", "section": "Miscellaneous", "hidden": false},
+              {"type": "refactor", "section": "Code Refactoring", "hidden": false},
+              {"type": "test", "section": "Tests", "hidden": false},
+              {"type": "build", "section": "Build System", "hidden": false},
+              {"type": "ci", "section": "Continuous Integration", "hidden": false}
+            ]
+          extra-files: |
+            backend/pyproject.toml
+
+  # Trigger the Docker build workflow when a release is created
+  trigger-docker-build:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Trigger Docker Build Workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release-docker.yml',
+              ref: 'main',
+              inputs: {
+                version: '${{ needs.release-please.outputs.version }}',
+                tag_name: '${{ needs.release-please.outputs.tag_name }}'
+              }
+            })
+            
+            console.log('Docker build workflow triggered for version ${{ needs.release-please.outputs.version }}');
