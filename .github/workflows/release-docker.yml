@@ -23,8 +23,8 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  BASE_IMAGE_NAME: ${{ github.repository }}-base
-  BUILD_IMAGE_NAME: ${{ github.repository }}-builder
+  BASE_IMAGE_NAME: ntubiolin/screen2action-base
+  BUILD_IMAGE_NAME: ntubiolin/screen2action-builder
 
 jobs:
   # Build and cache the base image when dependencies change

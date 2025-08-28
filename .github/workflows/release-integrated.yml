@@ -1,9 +1,12 @@
 name: Release and Build
 
 on:
-  push:
-    branches:
-      - main
+  # Disabled automatic trigger on main branch push
+  # Uncomment below to re-enable automatic build and release
+  # push:
+  #   branches:
+  #     - main
+  workflow_dispatch:  # Allow manual trigger
 
 permissions:
   contents: write
@@ -12,7 +15,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  BASE_IMAGE_NAME: ${{ github.repository }}-base
+  BASE_IMAGE_NAME: ntubiolin/screen2action-base
 
 jobs:
   # Step 1: Release Please creates PR and manages releases
