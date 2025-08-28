@@ -64,7 +64,7 @@ jobs:
     - name: Test docker-compose configuration
       run: |
         echo "Testing docker-compose configuration..."
-        docker-compose config
+        docker compose config
     
     - name: Report success
       run: |

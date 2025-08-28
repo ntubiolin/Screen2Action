@@ -106,7 +106,7 @@ fi
 if [ "$CLEAN_BUILD" = true ]; then
     print_message $YELLOW "Cleaning previous builds..."
     rm -rf release-*
-    docker-compose down --remove-orphans 2>/dev/null || true
+    docker compose down --remove-orphans 2>/dev/null || true
     docker system prune -f
 fi
 
@@ -126,11 +126,11 @@ build_platform() {
     
     # Run Docker Compose build
     if [ "$VERBOSE" = true ]; then
-        docker-compose build "build-$platform"
-        docker-compose run --rm "build-$platform"
+        docker compose build "build-$platform"
+        docker compose run --rm "build-$platform"
     else
-        docker-compose build "build-$platform" 2>&1 | grep -E "Step|Successfully|ERROR" || true
-        docker-compose run --rm "build-$platform" 2>&1 | grep -E "Building|Creating|ERROR|Warning" || true
+        docker compose build "build-$platform" 2>&1 | grep -E "Step|Successfully|ERROR" || true
+        docker compose run --rm "build-$platform" 2>&1 | grep -E "Building|Creating|ERROR|Warning" || true
     fi
     
     # Check if build was successful

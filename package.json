@@ -32,7 +32,7 @@
     "docker:build:win": "chmod +x scripts/docker-build.sh && scripts/docker-build.sh --target win",
     "docker:build:linux": "chmod +x scripts/docker-build.sh && scripts/docker-build.sh --target linux",
     "docker:build:clean": "chmod +x scripts/docker-build.sh && scripts/docker-build.sh --clean",
-    "docker:dev": "docker-compose up dev",
+    "docker:dev": "docker compose up dev",
     "docker:base:build": "chmod +x scripts/docker-base-build.sh && scripts/docker-base-build.sh",
     "docker:base:check": "npm run docker:base:build -- --check",
     "docker:base:force": "npm run docker:base:build -- --force",
