@@ -641,6 +641,7 @@ Edit `backend/config/mcp_servers.json` to add custom MCP servers:
 For capturing system audio, install BlackHole:
 1. Download from: https://github.com/ExistentialAudio/BlackHole
 2. Configure Multi-Output Device in Audio MIDI Setup
+   - Detailed setup guide: [BlackHole Multi-Output Device Configuration](https://github.com/ExistentialAudio/BlackHole/wiki/Multi-Output-Device#4-select-output-devices)
 3. The app will automatically detect and use BlackHole for system audio
 
 ### Note Timestamps
