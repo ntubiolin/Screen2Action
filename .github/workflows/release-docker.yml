@@ -89,6 +89,7 @@ jobs:
     needs: build-base-image
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 1  # Run builds sequentially to avoid resource conflicts
       matrix:
         platform: [linux, windows, mac]
     
