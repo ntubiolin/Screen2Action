@@ -1,9 +1,12 @@
 name: Release Please
 
 on:
-  push:
-    branches:
-      - main
+  # Disabled automatic trigger on main branch push
+  # Uncomment below to re-enable automatic releases
+  # push:
+  #   branches:
+  #     - main
+  workflow_dispatch:  # Allow manual trigger
 
 permissions:
   contents: write
