@@ -248,6 +248,98 @@ To create a distributable DMG installer:
 npm run build:dmg
 ```
 
+### Build with Docker
+
+Docker provides a consistent build environment across different platforms and simplifies the release process.
+
+#### Prerequisites
+- Docker installed and running
+- Docker Compose installed
+
+#### Build for All Platforms
+
+```bash
+# Build releases for all platforms (macOS, Windows, Linux)
+npm run docker:build
+
+# Or use the script directly
+./scripts/docker-build.sh
+```
+
+#### Build for Specific Platforms
+
+```bash
+# Build only for macOS
+npm run docker:build:mac
+
+# Build only for Windows
+npm run docker:build:win
+
+# Build only for Linux
+npm run docker:build:linux
+```
+
+#### Clean Build
+
+```bash
+# Clean previous builds and rebuild
+npm run docker:build:clean
+
+# Or with specific target
+./scripts/docker-build.sh --target mac --clean
+```
+
+#### Docker Build Options
+
+The Docker build script supports several options:
+
+```bash
+# Show help
+./scripts/docker-build.sh --help
+
+# Verbose output
+./scripts/docker-build.sh --verbose
+
+# Clean build for specific platform
+./scripts/docker-build.sh --target win --clean --verbose
+```
+
+#### Output
+
+Built releases will be available in:
+- `release-mac/` - macOS releases (.dmg files)
+- `release-win/` - Windows releases (.exe installers)
+- `release-linux/` - Linux releases (.AppImage files)
+- `release-all/` - All platform releases (when building all)
+
+#### Docker Development Environment
+
+You can also use Docker for development:
+
+```bash
+# Start development environment with hot reload
+npm run docker:dev
+
+# Or using docker-compose directly
+docker-compose up dev
+```
+
+This will:
+- Start the backend server on port 8000
+- Start the frontend dev server on port 3000/5173
+- Mount source code for hot reloading
+- Set up virtual display for Electron development
+
+#### Troubleshooting Docker Builds
+
+1. **macOS builds on Linux**: Building macOS apps in Linux Docker containers has limitations. For production builds, consider using macOS runners in CI/CD.
+
+2. **Windows builds on Linux**: Wine is used for Windows builds in Linux containers. Some features may not work perfectly.
+
+3. **Permissions**: If you encounter permission issues, ensure Docker has access to the project directory.
+
+4. **Resource limits**: Building all platforms simultaneously requires significant resources. Consider building one platform at a time if you encounter memory issues.
+
 This creates a complete installer that bundles both the frontend and Python backend. Users can:
 1. Download and open the DMG file
 2. Drag Screen2Action to Applications folder

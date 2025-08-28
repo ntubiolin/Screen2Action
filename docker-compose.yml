@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # Build service for macOS releases
+  build-mac:
+    build:
+      context: .
+      dockerfile: Dockerfile.mac
+      target: release-builder
+    platform: linux/amd64
+    volumes:
+      - ./release-mac:/output/release
+    environment:
+      - ELECTRON_BUILDER_ARCH=x64,arm64
+      - BUILD_TARGET=mac
+    command: |
+      sh -c "
+        npm run dist -- --mac &&
+        cp -r release/* /output/release/
+      "
+
+  # Build service for Windows releases
+  build-win:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: release-builder
+    platform: linux/amd64
+    volumes:
+      - ./release-win:/output/release
+    environment:
+      - ELECTRON_BUILDER_ARCH=x64
+      - BUILD_TARGET=win
+      - ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES=true
+    command: |
+      sh -c "
+        npm run dist -- --win &&
+        cp -r release/* /output/release/
+      "
+
+  # Build service for Linux releases
+  build-linux:
+    build:
+      context: .
+      dockerfile: Dockerfile.linux
+    platform: linux/amd64
+    volumes:
+      - ./release-linux:/output/release
+    environment:
+      - ELECTRON_BUILDER_ARCH=x64
+      - BUILD_TARGET=linux
+
+  # Build all platforms
+  build-all:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: release-builder
+    platform: linux/amd64
+    volumes:
+      - ./release-all:/output/release
+    environment:
+      - ELECTRON_BUILDER_ARCH=x64
+      - ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES=true
+    command: |
+      sh -c "
+        npm run dist -- --mac --win --linux &&
+        cp -r release/* /output/release/
+      "
+
+  # Development environment
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    platform: linux/amd64
+    ports:
+      - "3000:3000"  # Vite dev server
+      - "5173:5173"  # Alternative Vite port
+      - "8000:8000"  # Backend API
+    volumes:
+      - ./src:/app/src
+      - ./backend:/app/backend
+      - ./public:/app/public
+      - ./package.json:/app/package.json
+      - ./tsconfig.json:/app/tsconfig.json
+      - ./vite.config.ts:/app/vite.config.ts
+    environment:
+      - NODE_ENV=development
+      - DISPLAY=:99
+    command: |
+      sh -c "
+        Xvfb :99 -screen 0 1024x768x24 &
+        npm run dev
+      "
