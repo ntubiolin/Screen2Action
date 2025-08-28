@@ -12,7 +12,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  BASE_IMAGE_NAME: ${{ github.repository }}-base
+  BASE_IMAGE_NAME: ntubiolin/screen2action-base
 
 jobs:
   # Step 1: Release Please creates PR and manages releases
