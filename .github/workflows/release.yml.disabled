@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     strategy:
+      max-parallel: 1  # Run builds sequentially to avoid resource conflicts
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
         include:

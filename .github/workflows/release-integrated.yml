@@ -82,6 +82,7 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 1  # Run builds sequentially to avoid resource conflicts
       matrix:
         platform: [linux, windows, mac]
     
