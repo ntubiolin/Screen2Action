@@ -1,6 +1,6 @@
 {
   "name": "screen2action",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "npm run dev:renderer & npm run dev:electron",
