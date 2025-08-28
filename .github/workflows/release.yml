@@ -96,9 +96,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: mac-release
-        path: |
-          release/*.dmg
-          release/*.zip
+        path: release/*.dmg
         if-no-files-found: error
     
     - name: Upload Linux artifacts
@@ -143,7 +141,6 @@ jobs:
         echo "" >> release-notes.md
         echo "### macOS" >> release-notes.md
         echo "- **DMG**: For standard installation" >> release-notes.md
-        echo "- **ZIP**: For portable use" >> release-notes.md
         echo "" >> release-notes.md
         echo "### Windows" >> release-notes.md
         echo "- **EXE**: NSIS installer for Windows" >> release-notes.md
@@ -182,7 +179,6 @@ jobs:
         prerelease: ${{ contains(steps.version.outputs.VERSION, '-beta') || contains(steps.version.outputs.VERSION, '-alpha') }}
         files: |
           release-artifacts/mac-release/*.dmg
-          release-artifacts/mac-release/*.zip
           release-artifacts/linux-release/*.AppImage
           release-artifacts/windows-release/*.exe
         fail_on_unmatched_files: true
